@@ -1,0 +1,11 @@
+#include <thrust/random.h>
+#include "intersections.h"
+
+#define ERRORCHECK 1
+
+#define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
+#define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
+
+void checkCUDAErrorFn(const char* msg, const char* file, int line);
+__host__ __device__
+thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int depth);

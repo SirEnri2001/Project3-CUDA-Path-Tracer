@@ -70,6 +70,9 @@ void Scene::loadFromJSON(const std::string& jsonName)
         if (type == "cube")
         {
             newGeom.type = CUBE;
+        }else if (type=="plane")
+        {
+            newGeom.type = PLANE;
         }
         else
         {

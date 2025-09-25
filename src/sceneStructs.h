@@ -12,7 +12,8 @@
 enum GeomType
 {
     SPHERE,
-    CUBE
+    CUBE,
+    PLANE
 };
 
 struct Ray
@@ -71,7 +72,10 @@ struct RenderState
 struct PathSegment
 {
     Ray ray;
-    glm::vec3 color;
+    glm::vec3 Contribution;
+    glm::vec3 BSDF;
+    float PDF;
+    float Cosine;
     int pixelIndex;
     int remainingBounces;
 };

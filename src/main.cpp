@@ -301,6 +301,7 @@ bool MouseOverImGuiWindow()
 
 void mainLoop()
 {
+    pathtraceCreate(scene);
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
@@ -446,8 +447,7 @@ void runCuda()
 
     if (iteration == 0)
     {
-        pathtraceFree();
-        pathtraceInit(scene);
+        pathtraceNewFrame(scene);
     }
 
     if (iteration < renderState->iterations)
