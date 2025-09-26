@@ -61,6 +61,8 @@ set(headers
     src/common.h
     src/pathtraceImpl.h
     src/geometry.h
+    src/mesh.h
+    src/MeshLoader/tiny_obj_loader.h
 )
 
 set(sources
@@ -77,6 +79,7 @@ set(sources
     src/common.cu
     src/pathtraceImpl.cu
     src/geometry.cu
+    src/mesh.cpp
 )
 
 set(imgui_headers

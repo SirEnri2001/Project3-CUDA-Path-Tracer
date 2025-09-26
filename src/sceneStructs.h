@@ -13,7 +13,8 @@ enum GeomType
 {
     SPHERE,
     CUBE,
-    PLANE
+    PLANE,
+    MESH
 };
 
 struct Ray

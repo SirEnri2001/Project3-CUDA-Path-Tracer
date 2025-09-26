@@ -1,5 +1,7 @@
 #include "geometry.h"
 #include <thrust/random.h>
+
+#include "mesh.h"
 #include "sceneStructs.h"
 
 __device__ void pdfPlane(float& OutPdf, Geom& InGeom)
@@ -229,4 +231,78 @@ __host__ __device__ float planeIntersectionTest(
     intersectionPoint = multiplyMV(plane.transform, glm::vec4(planeIntersect, 1.0f));
     normal = glm::normalize(multiplyMV(plane.invTranspose, glm::vec4(glm::vec3(0.f, 1.f, 0.f), 0.0f)));
     return glm::length(r.origin - intersectionPoint);
+}
+
+__host__ __device__ float triangleIntersectionTest(
+	glm::vec3 p1, glm::vec3 p2, glm::vec3 p3,
+    Ray r,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal,
+	bool& front)
+{
+    glm::vec3 l1 = p1 - r.origin;
+	glm::vec3 p12 = p2 - p1;
+	glm::vec3 p13 = p3 - p1;
+	normal = glm::normalize(glm::cross(p12, p13));
+	float t = glm::dot(-normal, l1);
+    intersectionPoint = r.origin + normal * t;
+    if (glm::dot(intersectionPoint - r.origin, r.direction) < 0.f)
+    {
+        return -1.f;
+	}
+	glm::vec3 s1 = p1 - intersectionPoint;
+	glm::vec3 s2 = p2 - intersectionPoint;
+	glm::vec3 s3 = p3 - intersectionPoint;
+    if (glm::dot(normal, glm::cross(s1, s2)) >= 0.f &&
+        glm::dot(normal, glm::cross(s2, s3)) >= 0.f &&
+        glm::dot(normal, glm::cross(s3, s1)) >= 0.f)
+    {
+        front = glm::dot(normal, r.direction) < 0.f;
+        if (!front)
+        {
+            normal = -normal;
+        }
+        return glm::length(r.origin - intersectionPoint);
+	}
+	return -1.f;
+}
+
+__host__ __device__ float meshIntersectionTest(
+    Geom mesh, StaticMeshData_Device* dev_staticMeshes,
+    Ray r,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal)
+{
+	int totalObjectCount = dev_staticMeshes->VertexCount / 3;
+    Ray q;
+    q.origin = multiplyMV(mesh.inverseTransform, glm::vec4(r.origin, 1.0f));
+    q.direction = glm::normalize(multiplyMV(mesh.inverseTransform, glm::vec4(r.direction, 0.0f)));
+    float minDistance = -1.f;
+    glm::vec3 tempIntersection;
+	glm::vec3 tempNormal;
+	bool front;
+    float t_min = FLT_MAX;
+    float t;
+    for (int i = 0;i < totalObjectCount;i++)
+    {
+	    // test each triangle in the mesh
+        t = triangleIntersectionTest(
+            dev_staticMeshes->VertexPosition_Device[i * 3 + 0],
+            dev_staticMeshes->VertexPosition_Device[i * 3 + 1],
+            dev_staticMeshes->VertexPosition_Device[i * 3 + 2],
+            q,
+            tempIntersection,
+            tempNormal,
+            front
+        );
+        if (t>0.f)
+        {
+	        t_min = glm::min(t, t_min);
+        }
+    }
+
+    intersectionPoint = multiplyMV(mesh.transform, glm::vec4(tempIntersection, 1.0f));
+    normal = glm::normalize(multiplyMV(mesh.invTranspose, glm::vec4(tempNormal, 0.0f)));
+    minDistance = glm::length(r.origin - intersectionPoint);
+	return t_min == FLT_MAX ? -1.f : minDistance;
 }

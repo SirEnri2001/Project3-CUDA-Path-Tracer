@@ -4,6 +4,7 @@
 #include "glm/glm.hpp"
 #include "sceneStructs.h"
 
+struct StaticMeshData_Device;
 __device__ void sampleCube(Geom& InGeom, glm::vec3& OutWorldPosition, glm::vec3& OutWorldNormal, float& OutPdf,
                            thrust::default_random_engine& rng);
 __device__ void samplePlane(Geom& InGeom, glm::vec3& OutWorldPosition, glm::vec3& OutWorldNormal, float& OutPdf,
@@ -71,3 +72,8 @@ __host__ __device__ float planeIntersectionTest(
     glm::vec3& normal,
     bool& outside);
 __device__ void pdfPlane(float& OutPdf, Geom& InGeom);
+__host__ __device__ float meshIntersectionTest(
+    Geom plane, StaticMeshData_Device* dev_staticMeshes,
+    Ray r,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal);

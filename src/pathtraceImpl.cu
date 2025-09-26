@@ -6,6 +6,7 @@
 #include "intersections.h"
 #include "sceneStructs.h"
 #include "utilities.h"
+#include "mesh.h"
 
 
 /**
@@ -16,12 +17,13 @@
 * motion blur - jitter rays "in time"
 * lens effect - jitter ray origin positions based on a lens
 */
-__global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, PathSegment* pathSegments)
+__global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, PathSegment* pathSegments, int* dev_pathAlive)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
     if (x < cam.resolution.x && y < cam.resolution.y) {
         int index = x + (y * cam.resolution.x);
+        dev_pathAlive[index] = index;
         PathSegment& segment = pathSegments[index];
         thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, traceDepth);
         thrust::uniform_real_distribution<float> u01(0, 1);
@@ -50,7 +52,7 @@ __device__ void getIntersectionGeometryIndex(
     glm::vec3& normal,
     Ray& ray,
     int geoms_size,
-	Geom* geoms
+	Geom* geoms, StaticMeshData_Device* dev_staticMeshes
 )
 {
     float t;
@@ -76,6 +78,9 @@ __device__ void getIntersectionGeometryIndex(
         }else if (geom.type == PLANE)
         {
             t = planeIntersectionTest(geom, ray, tmp_intersect, tmp_normal, outside);
+        }else if (geom.type==MESH && dev_staticMeshes!=nullptr)
+        {
+			//t = meshIntersectionTest(geom, dev_staticMeshes, ray, tmp_intersect, tmp_normal);
         }
         // TODO: add more intersection tests here... triangle? metaball? CSG?
 
@@ -98,39 +103,51 @@ __global__ void computeIntersections(
     Geom* geoms,
     int geoms_size,
     ShadeableIntersection* intersections,
-    int* device_materialIds)
+    int* device_materialIds, int* dev_pathAlive, StaticMeshData_Device* dev_staticMeshes)
 {
-    int path_index = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (path_index < num_paths)
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+	int path_index = dev_pathAlive[tid];
+    if (path_index < 0 || tid >= num_paths)
     {
-        PathSegment pathSegment = pathSegments[path_index];
-        int hit_geom_index = -1;
-		float t_min = FLT_MAX;
-        glm::vec3 intersect_point;
-        glm::vec3 normal;
+        return;
+    }
+    PathSegment pathSegment = pathSegments[path_index];
+	// If there are no remaining bounces, no need to trace
+    if (pathSegment.remainingBounces <= 0) {
+        intersections[path_index].t = -1.0f;
+        intersections[path_index].materialId = -1;
+        device_materialIds[path_index] = -1;
+        dev_pathAlive[tid] = -1;
+        return;
+	}
+    int hit_geom_index = -1;
+	float t_min = FLT_MAX;
+    glm::vec3 intersect_point;
+    glm::vec3 normal;
 
-        getIntersectionGeometryIndex(
-            t_min, hit_geom_index, intersect_point, normal,
-            pathSegment.ray, geoms_size, geoms);
+    getIntersectionGeometryIndex(
+        t_min, hit_geom_index, intersect_point, normal,
+        pathSegment.ray, geoms_size, geoms, dev_staticMeshes);
 
-        if (hit_geom_index == -1)
-        {
-            intersections[path_index].t = -1.0f;
-            intersections[path_index].materialId = -1;
-            device_materialIds[path_index] = -1;
-            pathSegment.remainingBounces = 0;
-            pathSegments[path_index] = pathSegment;
-        }
-        else
-        {
-            // The ray hits something
-            int matId = geoms[hit_geom_index].materialid;
-            intersections[path_index].t = t_min;
-            intersections[path_index].materialId = matId;
-            device_materialIds[path_index] = matId;
-            intersections[path_index].surfaceNormal = normal;
-        }
+    if (hit_geom_index == -1)
+    {
+        intersections[path_index].t = -1.0f;
+        intersections[path_index].materialId = -1;
+        device_materialIds[path_index] = -1;
+        dev_pathAlive[tid] = -1;
+        //pathSegment.remainingBounces = 0;
+        //pathSegments[path_index] = pathSegment;
+        pathSegments[path_index].Contribution = glm::vec3(0.f, 0.f, 1.f);
+    }
+    else
+    {
+        // The ray hits something
+        int matId = geoms[hit_geom_index].materialid;
+        intersections[path_index].t = t_min;
+        intersections[path_index].materialId = matId;
+        device_materialIds[path_index] = matId;
+        intersections[path_index].surfaceNormal = normal;
+		pathSegments[path_index].Contribution = glm::vec3(1.f, 1.f, 0.f);
     }
 }
 
@@ -213,7 +230,7 @@ __device__ bool sampleLightFromIntersections(
 	getIntersectionGeometryIndex(
 		t, hit_geom_index,
         tmp_intersect, tmp_normal,
-        wj, geomSize, geoms);
+        wj, geomSize, geoms, nullptr);
     outDirectLight += light_mat.emittance;
     return dotProduct > 0.0001f && glm::length(tmp_intersect - lightPosition) < 0.001f;
 }
@@ -239,7 +256,7 @@ __device__ void SampleDirectLightMIS(glm::vec3& OutContribution,
     float t;
     int hit_index;
     glm::vec3 intersect, normal;
-    getIntersectionGeometryIndex(t, hit_index, intersect, normal, wj, GeomSize, Geoms);
+    getIntersectionGeometryIndex(t, hit_index, intersect, normal, wj, GeomSize, Geoms, nullptr);
     if (hit_index == 0)
     {
         getGeomPDF(pdf_Ld, InLightGeom);
@@ -254,33 +271,38 @@ __device__ void SampleDirectLightMIS(glm::vec3& OutContribution,
 
 
 __global__ void generateRayFromIntersections(int iter, int numPaths,
-    PathSegment* pathSegments, ShadeableIntersection* dev_intersections, 
-    Material* inMaterial, int geomSize, Geom* geoms, Geom* light_geoms)
+    PathSegment* pathSegments, ShadeableIntersection* dev_intersections,
+    Material* inMaterial, int geomSize, Geom* geoms, Geom* light_geoms, int* dev_pathAlive)
 {
-    int id = (blockIdx.x * blockDim.x) + threadIdx.x;
-    if (id >= numPaths)
+    int tid = (blockIdx.x * blockDim.x) + threadIdx.x;
+    int pathIndex = dev_pathAlive[tid];
+    if (pathIndex < 0)
     {
         return;
     }
-    PathSegment path_segment = pathSegments[id];
-    ShadeableIntersection intersection = dev_intersections[id];
+    if (tid >= numPaths)
+    {
+        return;
+    }
+    PathSegment path_segment = pathSegments[pathIndex];
+    ShadeableIntersection intersection = dev_intersections[pathIndex];
 	Material light_mat = inMaterial[light_geoms[0].materialid];
 	Geom light_geom = light_geoms[0];
     if (intersection.materialId < 0) {
         path_segment.remainingBounces = 0;
-        pathSegments[id] = path_segment;
+        pathSegments[pathIndex] = path_segment;
         return;
     }
 
     if (intersection.t > 0.0f && path_segment.remainingBounces > 0) {
         Material material = inMaterial[intersection.materialId];
 		glm::vec3 p = getPointOnRay(path_segment.ray, intersection.t);
-        thrust::default_random_engine rng = makeSeededRandomEngine(iter, id, path_segment.remainingBounces);
+        thrust::default_random_engine rng = makeSeededRandomEngine(iter, pathIndex, path_segment.remainingBounces);
         if (material.emittance > 0.)
         {
 			path_segment.Contribution += path_segment.BSDF * material.emittance / path_segment.PDF * path_segment.Cosine;
             path_segment.remainingBounces = 0;
-            pathSegments[id] = path_segment;
+            pathSegments[pathIndex] = path_segment;
             return;
         }
         glm::vec3 contrib;
@@ -297,6 +319,6 @@ __global__ void generateRayFromIntersections(int iter, int numPaths,
 
         path_segment.ray = wi;
 		path_segment.remainingBounces--;
-    	pathSegments[id] = path_segment;
+    	pathSegments[pathIndex] = path_segment;
     }
 }
