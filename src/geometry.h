@@ -74,6 +74,6 @@ __host__ __device__ float planeIntersectionTest(
 __device__ void pdfPlane(float& OutPdf, Geom& InGeom);
 __host__ __device__ float meshIntersectionTest(
     Geom plane, StaticMeshData_Device* dev_staticMeshes,
-    Ray r,
-    glm::vec3& intersectionPoint,
-    glm::vec3& normal);
+    Ray ray_World,
+    glm::vec3& IntersectPos_World,
+    glm::vec3& IntersectNor_World);

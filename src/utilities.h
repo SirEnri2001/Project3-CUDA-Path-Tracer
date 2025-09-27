@@ -21,6 +21,7 @@ class GuiDataContainer
 public:
     GuiDataContainer() : TracedDepth(0) {}
     int TracedDepth;
+	bool isDebug = false;
 };
 
 namespace utilityCore

@@ -4,6 +4,9 @@
 #include <string>
 #include <glm/glm.hpp>
 
+#define GRID_SIZE 4096
+#define GRID_WIDTH 16
+
 struct StaticMeshData_Host
 {
 	glm::vec3* VertexPosition_Host;
@@ -39,6 +42,9 @@ struct StaticMeshData_Device
 	glm::vec3* VertexNormal_Device;
 	glm::vec3* VertexColor_Device;
 	glm::vec2* VertexTexCoord_Device;
+	int* VertexGridIndices_Device;
+	int* GridIndicesStart_Device;
+	int* GridIndicesEnd_Device;
 	unsigned int* Indices_Device;
 	unsigned int VertexCount;
 	StaticMeshData_Device() : VertexPosition_Device(nullptr), VertexNormal_Device(nullptr), VertexColor_Device(nullptr), VertexCount(0), Indices_Device(nullptr), VertexTexCoord_Device(nullptr) {}

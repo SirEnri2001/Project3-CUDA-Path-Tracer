@@ -75,6 +75,7 @@ struct PathSegment
     Ray ray;
     glm::vec3 Contribution;
     glm::vec3 BSDF;
+    glm::vec3 debug;
     float PDF;
     float Cosine;
     int pixelIndex;
@@ -86,7 +87,7 @@ struct PathSegment
 // 2) BSDF evaluation: generate a new ray
 struct ShadeableIntersection
 {
-  float t;
-  glm::vec3 surfaceNormal;
-  int materialId;
+    glm::vec3 intersectPoint;
+    glm::vec3 surfaceNormal;
+    int materialId;
 };

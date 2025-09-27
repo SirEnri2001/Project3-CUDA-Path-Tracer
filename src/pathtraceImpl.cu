@@ -8,6 +8,78 @@
 #include "utilities.h"
 #include "mesh.h"
 
+__device__ int GetPointBoundNextLayer(glm::vec3 p)
+{
+	if (p.x<0.5f && p.y<0.5f&&p.z<0.5f)
+	{
+        return 0;
+	}
+    if (p.x >= 0.5f && p.y<0.5f&&p.z<0.5f)
+    {
+        return 1;
+	}
+    if (p.x < 0.5f && p.y >= 0.5f&&p.z<0.5f)
+    {
+        return 2;
+    }
+    if (p.x >= 0.5f && p.y >= 0.5f&&p.z<0.5f)
+    {
+        return 3;
+    }
+    if (p.x < 0.5f && p.y<0.5f&&p.z >= 0.5f)
+    {
+        return 4;
+    }
+    if (p.x >= 0.5f && p.y<0.5f&&p.z >= 0.5f)
+    {
+        return 5;
+    }
+    if (p.x < 0.5f && p.y >= 0.5f&&p.z >= 0.5f)
+    {
+        return 6;
+    }
+    if (p.x >= 0.5f && p.y >= 0.5f&&p.z >= 0.5f)
+    {
+        return 7;
+	}
+}
+
+__device__ int GetTriangleBound(glm::vec3 p1, glm::vec3 p2, glm::vec3 p3) // p1 p2 p3 within [0,1]
+{
+    float CurrentBoxSize = 1.f;
+	float halfBoxSize = 0.5f;
+	int bound = -1;
+	int boundP1 = GetPointBoundNextLayer(p1);
+	int boundP2 = GetPointBoundNextLayer(p2);
+	int boundP3 = GetPointBoundNextLayer(p3);
+    if (boundP1!=boundP2 || boundP1 != boundP3)
+    {
+        return bound;
+    }
+	bound = boundP1;
+    p1 = glm::fract(p1 * 2.f);
+	p2 = glm::fract(p2 * 2.f);
+	p3 = glm::fract(p3 * 2.f);
+    return 8 * (bound + 1) + GetTriangleBound(p1, p2, p3);
+}
+
+__global__ void calculateMeshGridSpeedup(StaticMeshData_Device* InMeshData, glm::vec3 boxMin, glm::vec3 boxMax)
+{
+	int triangleId = (blockIdx.x * blockDim.x) + threadIdx.x;
+    if (triangleId >= InMeshData->VertexCount / 3)
+    {
+        return;
+	}
+    glm::vec3 p1 = InMeshData->VertexPosition_Device[triangleId * 3 + 0];
+    glm::vec3 p2 = InMeshData->VertexPosition_Device[triangleId * 3 + 1];
+    glm::vec3 p3 = InMeshData->VertexPosition_Device[triangleId * 3 + 2];
+
+	p1 = (p1 - boxMin) / (boxMax - boxMin);
+	p2 = (p2 - boxMin) / (boxMax - boxMin);
+    p3 = (p3 - boxMin) / (boxMax - boxMin);
+    int bound = GetTriangleBound(p1, p2, p3);
+	InMeshData->VertexGridIndices_Device[triangleId] = bound;
+}
 
 /**
 * Generate PathSegments with rays from the camera through the screen into the
@@ -43,24 +115,26 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 
         segment.pixelIndex = index;
         segment.remainingBounces = traceDepth;
+		segment.debug = glm::vec3(1, 0, 1);
     }
 }
 
-__device__ void getIntersectionGeometryIndex(
-    float& t_min, int& hit_geom_index,
+__device__ float getIntersectionGeometryIndex(
+    int& hit_geom_index,
     glm::vec3& intersect_point,
     glm::vec3& normal,
-    Ray& ray,
+    Ray& InRayWorld,
     int geoms_size,
-	Geom* geoms, StaticMeshData_Device* dev_staticMeshes
+	Geom* geoms, 
+    StaticMeshData_Device* dev_staticMeshes
 )
 {
-    float t;
-    t_min = FLT_MAX;
+    float t = -1.0f;
+    float t_min = FLT_MAX;
     bool outside = true;
 
-    glm::vec3 tmp_intersect;
-    glm::vec3 tmp_normal;
+    glm::vec3 IntersectPos_World;
+    glm::vec3 IntersectNor_World;
 
     // naive parse through global geoms
 
@@ -70,30 +144,30 @@ __device__ void getIntersectionGeometryIndex(
 
         if (geom.type == CUBE)
         {
-            t = boxIntersectionTest(geom, ray, tmp_intersect, tmp_normal, outside);
+            t = boxIntersectionTest(geom, InRayWorld, IntersectPos_World, IntersectNor_World, outside);
         }
         else if (geom.type == SPHERE)
         {
-            t = sphereIntersectionTest(geom, ray, tmp_intersect, tmp_normal, outside);
-        }else if (geom.type == PLANE)
+            t = sphereIntersectionTest(geom, InRayWorld, IntersectPos_World, IntersectNor_World, outside);
+        }
+    	else if (geom.type == PLANE)
         {
-            t = planeIntersectionTest(geom, ray, tmp_intersect, tmp_normal, outside);
+            t = planeIntersectionTest(geom, InRayWorld, IntersectPos_World, IntersectNor_World, outside);
         }else if (geom.type==MESH && dev_staticMeshes!=nullptr)
         {
-			t = meshIntersectionTest(geom, dev_staticMeshes, ray, tmp_intersect, tmp_normal);
+			t = meshIntersectionTest(geom, dev_staticMeshes, InRayWorld, IntersectPos_World, IntersectNor_World);
         }
-        // TODO: add more intersection tests here... triangle? metaball? CSG?
-
         // Compute the minimum t from the intersection tests to determine what
         // scene geometry object was hit first.
         if (t > 0.0f && t_min > t)
         {
             t_min = t;
             hit_geom_index = i;
-            intersect_point = tmp_intersect;
-            normal = tmp_normal;
+            intersect_point = IntersectPos_World;
+            normal = IntersectNor_World;
         }
     }
+    return t_min;
 }
 
 __global__ void computeIntersections(
@@ -114,24 +188,21 @@ __global__ void computeIntersections(
     PathSegment pathSegment = pathSegments[path_index];
 	// If there are no remaining bounces, no need to trace
     if (pathSegment.remainingBounces <= 0) {
-        intersections[path_index].t = -1.0f;
         intersections[path_index].materialId = -1;
         device_materialIds[path_index] = -1;
         dev_pathAlive[tid] = -1;
         return;
 	}
     int hit_geom_index = -1;
-	float t_min = FLT_MAX;
     glm::vec3 intersect_point;
     glm::vec3 normal;
 
     getIntersectionGeometryIndex(
-        t_min, hit_geom_index, intersect_point, normal,
+        hit_geom_index, intersect_point, normal,
         pathSegment.ray, geoms_size, geoms, dev_staticMeshes);
 
     if (hit_geom_index == -1)
     {
-        intersections[path_index].t = -1.0f;
         intersections[path_index].materialId = -1;
         device_materialIds[path_index] = -1;
         dev_pathAlive[tid] = -1;
@@ -140,7 +211,7 @@ __global__ void computeIntersections(
     {
         // The ray hits something
         int matId = geoms[hit_geom_index].materialid;
-        intersections[path_index].t = t_min;
+		intersections[path_index].intersectPoint = intersect_point;
         intersections[path_index].materialId = matId;
         device_materialIds[path_index] = matId;
         intersections[path_index].surfaceNormal = normal;
@@ -196,6 +267,7 @@ __device__ void getGeomPDF(float& outPdf, Geom& InGeom)
 }
 
 __device__ bool sampleLightFromIntersections(
+    glm::vec3 &debug, 
     glm::vec3& outDirectLight,
     float& outPdf,
     Ray& wj,
@@ -217,22 +289,23 @@ __device__ bool sampleLightFromIntersections(
     float distance = glm::length(lightPosition - wj.origin);
     // convert pdf from area to solid angle
 	// pdf_L(direct light) = pdf_A * (distance * distance) / (n . wj)
-	float dotProduct = glm::dot(lightNormal, wj.direction);
+	float dotProduct = abs(glm::dot(lightNormal, wj.direction));
     outPdf /= dotProduct;
     outPdf *= (distance * distance);
 	float t;
 	glm::vec3 tmp_intersect;
 	glm::vec3 tmp_normal;
 	int hit_geom_index = -1;
-	getIntersectionGeometryIndex(
-		t, hit_geom_index,
+	t = getIntersectionGeometryIndex(
+		hit_geom_index,
         tmp_intersect, tmp_normal,
         wj, geomSize, geoms, mesh);
     outDirectLight += light_mat.emittance;
-    return dotProduct > 0.0001f && glm::length(tmp_intersect - lightPosition) < 0.001f;
+    debug = glm::vec3(t, 0.f, 0.f) / 10.f;
+    return dotProduct > 0.0001f && hit_geom_index == 0;//&& glm::length(tmp_intersect - lightPosition) < 0.001f;
 }
 
-__device__ void SampleDirectLightMIS(glm::vec3& OutContribution, 
+__device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContribution, 
     glm::vec3 In_p, glm::vec3 InSurfaceNormal, Material& InSurfaceMat, 
     Geom& InLightGeom, Material& InLightMat, int GeomSize, Geom* Geoms, StaticMeshData_Device* mesh,
     thrust::default_random_engine& rng)
@@ -242,28 +315,30 @@ __device__ void SampleDirectLightMIS(glm::vec3& OutContribution,
     glm::vec3 bsdf;
     float pdf_bsdf;
     Ray wj;
-    bool sampledDirectLight = sampleLightFromIntersections(directLight, pdf_Ld, wj, In_p, InLightMat, InLightGeom, GeomSize, Geoms, mesh, rng);
+    bool sampledDirectLight = sampleLightFromIntersections(debug, directLight, pdf_Ld, wj, In_p, InLightMat, InLightGeom, GeomSize, Geoms, mesh, rng);
     if (sampledDirectLight)
     {
         bsdfDiffuse(bsdf, pdf_bsdf, wj, InSurfaceNormal, &InSurfaceMat);
         float weight = power_heuristic(pdf_Ld, pdf_bsdf);
         OutContribution += directLight * bsdf * glm::max(0.f, glm::dot(wj.direction, InSurfaceNormal)) * weight / pdf_Ld;
     }
+	else
+    {
+	    OutContribution = glm::vec3(0.f);
+		return;
+    }
     bsdfDiffuseSample(bsdf, pdf_bsdf, wj, In_p, InSurfaceNormal, &InSurfaceMat, rng);
-    float t;
-    int hit_index;
+    int hit_index = -1;
     glm::vec3 intersect, normal;
-    getIntersectionGeometryIndex(t, hit_index, intersect, normal, wj, GeomSize, Geoms, mesh);
-    if (hit_index == 0)
+    getIntersectionGeometryIndex(hit_index, intersect, normal, wj, GeomSize, Geoms, mesh);
+    if (hit_index != 0)
     {
-        getGeomPDF(pdf_Ld, InLightGeom);
-        float weight = power_heuristic(pdf_bsdf, pdf_Ld);
-        OutContribution += directLight * bsdf * glm::max(0.f, glm::dot(wj.direction, InSurfaceNormal)) * weight / pdf_bsdf;
+       OutContribution = glm::vec3(0.f);
+       return;
     }
-    if (!sampledDirectLight || hit_index != 0)
-    {
-        OutContribution = glm::vec3(0.f);
-    }
+    getGeomPDF(pdf_Ld, InLightGeom);
+    float weight = power_heuristic(pdf_bsdf, pdf_Ld);
+    OutContribution += directLight * bsdf * glm::max(0.f, glm::dot(wj.direction, InSurfaceNormal)) * weight / pdf_bsdf;    
 }
 
 
@@ -290,32 +365,31 @@ __global__ void generateRayFromIntersections(int iter, int numPaths,
         pathSegments[pathIndex] = path_segment;
         return;
     }
-
-    if (intersection.t > 0.0f && path_segment.remainingBounces > 0) {
-        Material material = inMaterial[intersection.materialId];
-		glm::vec3 p = getPointOnRay(path_segment.ray, intersection.t);
-        thrust::default_random_engine rng = makeSeededRandomEngine(iter, pathIndex, path_segment.remainingBounces);
-        if (material.emittance > 0.)
-        {
-			path_segment.Contribution += path_segment.BSDF * material.emittance / path_segment.PDF * path_segment.Cosine;
-            path_segment.remainingBounces = 0;
-            pathSegments[pathIndex] = path_segment;
-            return;
-        }
-        glm::vec3 contrib;
-        SampleDirectLightMIS(contrib, p, intersection.surfaceNormal, material, 
-            light_geom, light_mat, geomSize, geoms, mesh, rng);
-		path_segment.Contribution += path_segment.BSDF * contrib / path_segment.PDF * path_segment.Cosine;
-        Ray wi;
-        glm::vec3 bsdf_at_p;
-		float pdf_bsdf;
-        bsdfDiffuseSample(bsdf_at_p, pdf_bsdf, wi, p, intersection.surfaceNormal, &material, rng);
-		path_segment.BSDF *= bsdf_at_p;
-        path_segment.PDF *= pdf_bsdf;
-		path_segment.Cosine *= glm::max(0.f, glm::dot(wi.direction, intersection.surfaceNormal));
-
-        path_segment.ray = wi;
-		path_segment.remainingBounces--;
-    	pathSegments[pathIndex] = path_segment;
+    Material material = inMaterial[intersection.materialId];
+	glm::vec3 p = intersection.intersectPoint + EPSILON * intersection.surfaceNormal;
+    thrust::default_random_engine rng = makeSeededRandomEngine(iter, pathIndex, path_segment.remainingBounces);
+    if (material.emittance > 0.)
+    {
+		path_segment.Contribution += path_segment.BSDF * material.emittance / path_segment.PDF * path_segment.Cosine;
+        path_segment.remainingBounces = 0;
+        pathSegments[pathIndex] = path_segment;
+        return;
     }
+    glm::vec3 contrib;
+    glm::vec3 debug;
+    SampleDirectLightMIS(debug, contrib, p, intersection.surfaceNormal, material,
+        light_geom, light_mat, geomSize, geoms, mesh, rng);
+    path_segment.debug = debug;
+	path_segment.Contribution += path_segment.BSDF * contrib / path_segment.PDF * path_segment.Cosine;
+    Ray wi;
+    glm::vec3 bsdf_at_p;
+	float pdf_bsdf;
+    bsdfDiffuseSample(bsdf_at_p, pdf_bsdf, wi, p, intersection.surfaceNormal, &material, rng);
+	path_segment.BSDF *= bsdf_at_p;
+    path_segment.PDF *= pdf_bsdf;
+	path_segment.Cosine *= glm::max(0.f, glm::dot(wi.direction, intersection.surfaceNormal));
+
+    path_segment.ray = wi;
+	path_segment.remainingBounces--;
+    pathSegments[pathIndex] = path_segment;
 }

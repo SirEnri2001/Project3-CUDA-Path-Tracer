@@ -140,13 +140,17 @@ void pathtraceFree()
 }
 
 // Add the current iteration's output to the overall image
-__global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iterationPaths)
+__global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iterationPaths, bool debug = false)
 {
 	int index = (blockIdx.x * blockDim.x) + threadIdx.x;
 
 	if (index < nPaths)
 	{
 		PathSegment iterationPath = iterationPaths[index];
+		if (debug)
+		{
+			iterationPath.Contribution = iterationPath.debug;
+		}
 		image[iterationPath.pixelIndex] += iterationPath.Contribution;
 	}
 }
@@ -182,7 +186,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 	// --- PathSegment Tracing Stage ---
 	// Shoot ray into scene, bounce between objects, push shading chunks
 	std::cout << "New Frame" << std::endl;
-	for (int i = 0; i < 2; i++)
+	for (int i = 0; i < iter; i++)
 	{
 		// clean shading chunks
 		cudaMemset(dev_path_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
@@ -237,7 +241,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
 	// Assemble this iteration and apply it to the image
 	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
-	finalGather<<<numBlocksPixels, blockSize1d>>>(total_paths, dev_image, dev_paths);
+	finalGather<<<numBlocksPixels, blockSize1d>>>(total_paths, dev_image, dev_paths, guiData->isDebug);
 
 	// Send results to OpenGL buffer for rendering
 	sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(pbo, cam.resolution, iter, dev_image);

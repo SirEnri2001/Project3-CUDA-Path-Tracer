@@ -96,6 +96,12 @@ void CreateDeviceObject(StaticMeshData_Device** OutData_Device, StaticMeshData_D
     cudaMemcpy(DeviceData_OnHost.VertexColor_Device, InData_Host.VertexColor_Host, sizeof(glm::vec3) * DeviceData_OnHost.VertexCount, cudaMemcpyHostToDevice);
     cudaMalloc((void**)&DeviceData_OnHost.Indices_Device, sizeof(unsigned int) * DeviceData_OnHost.VertexCount);
     cudaMemcpy(DeviceData_OnHost.Indices_Device, InData_Host.Indices_Host, sizeof(unsigned int) * DeviceData_OnHost.VertexCount, cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&DeviceData_OnHost.VertexGridIndices_Device, sizeof(int) * DeviceData_OnHost.VertexCount);
+    cudaMemset(DeviceData_OnHost.VertexGridIndices_Device, -1, sizeof(int) * DeviceData_OnHost.VertexCount);
+    cudaMalloc((void**)&DeviceData_OnHost.GridIndicesStart_Device, sizeof(int) * GRID_SIZE);
+    
+	cudaMalloc((void**)&DeviceData_OnHost.GridIndicesEnd_Device, sizeof(int) * GRID_SIZE);
+
     cudaMalloc((void**)OutData_Device, sizeof(StaticMeshData_Device));
 	cudaMemcpy(*OutData_Device, &DeviceData_OnHost, sizeof(StaticMeshData_Device), cudaMemcpyHostToDevice);
     checkCUDAError("CreateDeviceObject");

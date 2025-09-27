@@ -5,7 +5,7 @@
         {
             "TYPE":"Emitting",
             "RGB":[1.0, 1.0, 1.0],
-            "EMITTANCE":1.0
+            "EMITTANCE":9.0
         },
         "diffuse_white":
         {
@@ -25,7 +25,7 @@
         "specular_white":
         {
             "TYPE":"Specular",
-            "RGB":[0.98, 0.98, 0.98],
+            "RGB":[0.98, 0.50, 0.98],
             "ROUGHNESS":0.0
         }
     },
@@ -45,7 +45,7 @@
         {
             "TYPE":"plane",
             "MATERIAL":"light",
-            "TRANS":[0.0,9.0,0.0],
+            "TRANS":[0.0,9.9,0.0],
             "ROTAT":[0.0,0.0,0.0],
             "SCALE":[3.0,0.3,3.0]
         },
@@ -87,9 +87,9 @@
         {
             "TYPE":"mesh",
             "MATERIAL":"specular_white",
-            "TRANS":[-1.0,4.0,-1.0],
+            "TRANS":[-4.0,0.0,1.0],
             "ROTAT":[0.0,0.0,0.0],
-            "SCALE":[3.0,3.0,3.0]
+            "SCALE":[2.0,2.0,2.0]
         }
     ]
 }

@@ -3,6 +3,7 @@
 
 #include "mesh.h"
 #include "sceneStructs.h"
+#include "utilities.h"
 
 __device__ void pdfPlane(float& OutPdf, Geom& InGeom)
 {
@@ -71,7 +72,7 @@ __device__ void samplePlane(Geom& InGeom, glm::vec3& OutWorldPosition, glm::vec3
     float randomU = uFloat(rng);
     float randomV = uFloat(rng);
     float faceArea = 4.f * InGeom.scale.x * InGeom.scale.z;
-    glm::vec4 localNormal = glm::vec4(0.f, 1.f, 0.f, 0.f);
+    glm::vec4 localNormal = glm::vec4(0.f, -1.f, 0.f, 0.f);
     glm::vec4 localPosition = glm::vec4(randomU, 0.f, randomV, 1.0f);
     glm::vec4 worldPosition = InGeom.transform * localPosition;
     glm::vec4 worldNormal = InGeom.invTranspose * localNormal;
@@ -230,6 +231,10 @@ __host__ __device__ float planeIntersectionTest(
     }
     intersectionPoint = multiplyMV(plane.transform, glm::vec4(planeIntersect, 1.0f));
     normal = glm::normalize(multiplyMV(plane.invTranspose, glm::vec4(glm::vec3(0.f, 1.f, 0.f), 0.0f)));
+    if (q.direction.y>0.f)
+    {
+		normal = -normal;
+    }
     return glm::length(r.origin - intersectionPoint);
 }
 
@@ -245,11 +250,8 @@ __host__ __device__ float triangleIntersectionTest(
 	glm::vec3 p13 = p3 - p1;
 	normal = glm::normalize(glm::cross(p12, p13));
 	float t_vert = glm::dot(normal, l1);
-    if (t_vert<0.f)
-    {
-        return -1.f;
-    }
-	float t = t_vert / -glm::dot(normal, r.direction);
+	float directDot = glm::dot(normal, r.direction);
+	float t = t_vert / -directDot;
     intersectionPoint = r.origin + r.direction * t;
 	glm::vec3 s1 = p1 - intersectionPoint;
 	glm::vec3 s2 = p2 - intersectionPoint;
@@ -258,24 +260,26 @@ __host__ __device__ float triangleIntersectionTest(
         glm::dot(normal, glm::cross(s2, s3)) >= 0.f &&
         glm::dot(normal, glm::cross(s3, s1)) >= 0.f)
     {
-        return glm::length(r.origin - intersectionPoint);
+        return t;// glm::length(r.origin - intersectionPoint); // DAMN when use glm::length the ray which from the mesh will hit the mesh itself within a very short distance
 	}
 	return -1.f;
 }
 
 __host__ __device__ float meshIntersectionTest(
     Geom mesh, StaticMeshData_Device* dev_staticMeshes,
-    Ray r,
-    glm::vec3& intersectionPoint,
-    glm::vec3& normal)
+    Ray ray_World,
+    glm::vec3& IntersectPos_World,
+    glm::vec3& IntersectNor_World)
 {
 	int totalObjectCount = dev_staticMeshes->VertexCount / 3;
-    Ray q;
-    q.origin = multiplyMV(mesh.inverseTransform, glm::vec4(r.origin, 1.0f));
-    q.direction = glm::normalize(multiplyMV(mesh.inverseTransform, glm::vec4(r.direction, 0.0f)));
+    Ray ray_Local;
+    ray_Local.origin = multiplyMV(mesh.inverseTransform, glm::vec4(ray_World.origin, 1.0f));
+    ray_Local.direction = glm::normalize(multiplyMV(mesh.inverseTransform, glm::vec4(ray_World.direction, 0.0f)));
     float minDistance = -1.f;
-    glm::vec3 tempIntersection;
-	glm::vec3 tempNormal;
+    glm::vec3 IntersectPos_Local;
+	glm::vec3 IntersectNor_Local;
+    glm::vec3 Pos_Temp;
+	glm::vec3 Nor_Temp;
 	bool front;
     float t_min = FLT_MAX;
     float t;
@@ -286,20 +290,24 @@ __host__ __device__ float meshIntersectionTest(
             dev_staticMeshes->VertexPosition_Device[i * 3 + 0],
             dev_staticMeshes->VertexPosition_Device[i * 3 + 1],
             dev_staticMeshes->VertexPosition_Device[i * 3 + 2],
-            q,
-            tempIntersection,
-            tempNormal,
+            ray_Local,
+            Pos_Temp,
+            Nor_Temp,
             front
         );
         if (t>0.f && t < t_min)
         {
 	        t_min = glm::min(t, t_min);
-            intersectionPoint = tempIntersection;
-			normal = tempNormal;
+            IntersectPos_Local = Pos_Temp;
+            IntersectNor_Local = Nor_Temp;
         }
     }
-    intersectionPoint = multiplyMV(mesh.transform, glm::vec4(intersectionPoint, 1.0f));
-    normal = glm::normalize(multiplyMV(mesh.invTranspose, glm::vec4(normal, 0.0f)));
-    minDistance = glm::length(r.origin - intersectionPoint);
-	return t_min == FLT_MAX ? -1.f : minDistance;
+    if (t_min==FLT_MAX)
+    {
+		return -1.f;
+    }
+    IntersectPos_World = multiplyMV(mesh.transform, glm::vec4(IntersectPos_Local, 1.0f));
+    IntersectNor_World = glm::normalize(multiplyMV(mesh.invTranspose, glm::vec4(IntersectNor_Local, 0.0f)));
+    minDistance = glm::length(ray_World.origin - IntersectPos_World);
+	return minDistance;
 }
