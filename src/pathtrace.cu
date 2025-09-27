@@ -147,10 +147,7 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
 	if (index < nPaths)
 	{
 		PathSegment iterationPath = iterationPaths[index];
-		if (iterationPath.remainingBounces == 0)
-		{
-			image[iterationPath.pixelIndex] += iterationPath.Contribution;
-		}
+		image[iterationPath.pixelIndex] += iterationPath.Contribution;
 	}
 }
 
@@ -185,7 +182,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 	// --- PathSegment Tracing Stage ---
 	// Shoot ray into scene, bounce between objects, push shading chunks
 	std::cout << "New Frame" << std::endl;
-	for (int i = 0; i < 5; i++)
+	for (int i = 0; i < 2; i++)
 	{
 		// clean shading chunks
 		cudaMemset(dev_path_intersections, 0, pixelcount * sizeof(ShadeableIntersection));

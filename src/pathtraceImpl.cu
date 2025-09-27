@@ -80,7 +80,7 @@ __device__ void getIntersectionGeometryIndex(
             t = planeIntersectionTest(geom, ray, tmp_intersect, tmp_normal, outside);
         }else if (geom.type==MESH && dev_staticMeshes!=nullptr)
         {
-			//t = meshIntersectionTest(geom, dev_staticMeshes, ray, tmp_intersect, tmp_normal);
+			t = meshIntersectionTest(geom, dev_staticMeshes, ray, tmp_intersect, tmp_normal);
         }
         // TODO: add more intersection tests here... triangle? metaball? CSG?
 
@@ -135,9 +135,6 @@ __global__ void computeIntersections(
         intersections[path_index].materialId = -1;
         device_materialIds[path_index] = -1;
         dev_pathAlive[tid] = -1;
-        //pathSegment.remainingBounces = 0;
-        //pathSegments[path_index] = pathSegment;
-        pathSegments[path_index].Contribution = glm::vec3(0.f, 0.f, 1.f);
     }
     else
     {
@@ -147,7 +144,6 @@ __global__ void computeIntersections(
         intersections[path_index].materialId = matId;
         device_materialIds[path_index] = matId;
         intersections[path_index].surfaceNormal = normal;
-		pathSegments[path_index].Contribution = glm::vec3(1.f, 1.f, 0.f);
     }
 }
 

@@ -240,16 +240,17 @@ __host__ __device__ float triangleIntersectionTest(
     glm::vec3& normal,
 	bool& front)
 {
-    glm::vec3 l1 = p1 - r.origin;
+    glm::vec3 l1 = r.origin - p1;
 	glm::vec3 p12 = p2 - p1;
 	glm::vec3 p13 = p3 - p1;
 	normal = glm::normalize(glm::cross(p12, p13));
-	float t = glm::dot(-normal, l1);
-    intersectionPoint = r.origin + normal * t;
-    if (glm::dot(intersectionPoint - r.origin, r.direction) < 0.f)
+	float t_vert = glm::dot(normal, l1);
+    if (t_vert<0.f)
     {
         return -1.f;
-	}
+    }
+	float t = t_vert / -glm::dot(normal, r.direction);
+    intersectionPoint = r.origin + r.direction * t;
 	glm::vec3 s1 = p1 - intersectionPoint;
 	glm::vec3 s2 = p2 - intersectionPoint;
 	glm::vec3 s3 = p3 - intersectionPoint;
@@ -257,11 +258,6 @@ __host__ __device__ float triangleIntersectionTest(
         glm::dot(normal, glm::cross(s2, s3)) >= 0.f &&
         glm::dot(normal, glm::cross(s3, s1)) >= 0.f)
     {
-        front = glm::dot(normal, r.direction) < 0.f;
-        if (!front)
-        {
-            normal = -normal;
-        }
         return glm::length(r.origin - intersectionPoint);
 	}
 	return -1.f;
@@ -295,14 +291,15 @@ __host__ __device__ float meshIntersectionTest(
             tempNormal,
             front
         );
-        if (t>0.f)
+        if (t>0.f && t < t_min)
         {
 	        t_min = glm::min(t, t_min);
+            intersectionPoint = tempIntersection;
+			normal = tempNormal;
         }
     }
-
-    intersectionPoint = multiplyMV(mesh.transform, glm::vec4(tempIntersection, 1.0f));
-    normal = glm::normalize(multiplyMV(mesh.invTranspose, glm::vec4(tempNormal, 0.0f)));
+    intersectionPoint = multiplyMV(mesh.transform, glm::vec4(intersectionPoint, 1.0f));
+    normal = glm::normalize(multiplyMV(mesh.invTranspose, glm::vec4(normal, 0.0f)));
     minDistance = glm::length(r.origin - intersectionPoint);
 	return t_min == FLT_MAX ? -1.f : minDistance;
 }
