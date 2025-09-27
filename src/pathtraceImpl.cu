@@ -204,6 +204,7 @@ __device__ bool sampleLightFromIntersections(
     Geom& light_geom,
     int geomSize,
 	Geom* geoms,
+    StaticMeshData_Device* mesh,
     thrust::default_random_engine& rng
 )
 {
@@ -226,14 +227,14 @@ __device__ bool sampleLightFromIntersections(
 	getIntersectionGeometryIndex(
 		t, hit_geom_index,
         tmp_intersect, tmp_normal,
-        wj, geomSize, geoms, nullptr);
+        wj, geomSize, geoms, mesh);
     outDirectLight += light_mat.emittance;
     return dotProduct > 0.0001f && glm::length(tmp_intersect - lightPosition) < 0.001f;
 }
 
 __device__ void SampleDirectLightMIS(glm::vec3& OutContribution, 
     glm::vec3 In_p, glm::vec3 InSurfaceNormal, Material& InSurfaceMat, 
-    Geom& InLightGeom, Material& InLightMat, int GeomSize, Geom* Geoms,
+    Geom& InLightGeom, Material& InLightMat, int GeomSize, Geom* Geoms, StaticMeshData_Device* mesh,
     thrust::default_random_engine& rng)
 {
     glm::vec3 directLight;
@@ -241,7 +242,7 @@ __device__ void SampleDirectLightMIS(glm::vec3& OutContribution,
     glm::vec3 bsdf;
     float pdf_bsdf;
     Ray wj;
-    bool sampledDirectLight = sampleLightFromIntersections(directLight, pdf_Ld, wj, In_p, InLightMat, InLightGeom, GeomSize, Geoms, rng);
+    bool sampledDirectLight = sampleLightFromIntersections(directLight, pdf_Ld, wj, In_p, InLightMat, InLightGeom, GeomSize, Geoms, mesh, rng);
     if (sampledDirectLight)
     {
         bsdfDiffuse(bsdf, pdf_bsdf, wj, InSurfaceNormal, &InSurfaceMat);
@@ -252,7 +253,7 @@ __device__ void SampleDirectLightMIS(glm::vec3& OutContribution,
     float t;
     int hit_index;
     glm::vec3 intersect, normal;
-    getIntersectionGeometryIndex(t, hit_index, intersect, normal, wj, GeomSize, Geoms, nullptr);
+    getIntersectionGeometryIndex(t, hit_index, intersect, normal, wj, GeomSize, Geoms, mesh);
     if (hit_index == 0)
     {
         getGeomPDF(pdf_Ld, InLightGeom);
@@ -268,7 +269,7 @@ __device__ void SampleDirectLightMIS(glm::vec3& OutContribution,
 
 __global__ void generateRayFromIntersections(int iter, int numPaths,
     PathSegment* pathSegments, ShadeableIntersection* dev_intersections,
-    Material* inMaterial, int geomSize, Geom* geoms, Geom* light_geoms, int* dev_pathAlive)
+    Material* inMaterial, int geomSize, Geom* geoms, Geom* light_geoms, int* dev_pathAlive, StaticMeshData_Device* mesh)
 {
     int tid = (blockIdx.x * blockDim.x) + threadIdx.x;
     int pathIndex = dev_pathAlive[tid];
@@ -303,7 +304,7 @@ __global__ void generateRayFromIntersections(int iter, int numPaths,
         }
         glm::vec3 contrib;
         SampleDirectLightMIS(contrib, p, intersection.surfaceNormal, material, 
-            light_geom, light_mat, geomSize, geoms, rng);
+            light_geom, light_mat, geomSize, geoms, mesh, rng);
 		path_segment.Contribution += path_segment.BSDF * contrib / path_segment.PDF * path_segment.Cosine;
         Ray wi;
         glm::vec3 bsdf_at_p;

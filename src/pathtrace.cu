@@ -227,7 +227,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 		generateRayFromIntersections << <numblocksPathSegmentTracing, blockSize1d >> >(
 			iter, num_paths, dev_path_begin,
 			dev_path_intersections, dev_materials,
-			hst_scene->geoms.size(), dev_geoms, device_light_geoms, device_pathAlive);
+			hst_scene->geoms.size(), dev_geoms, device_light_geoms, device_pathAlive, device_staticMeshData);
 		depth++;
 		if (guiData != NULL)
 		{
