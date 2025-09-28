@@ -132,8 +132,17 @@ void CreateDeviceObject(StaticMeshData_Device** OutData_Device, StaticMeshData_D
     cudaMemset(DeviceData_OnHost.raw.TraingleToGridIndices_Device, -1, sizeof(int) * DeviceData_OnHost.VertexCount / 3);
 
 	cudaMalloc((void**)&DeviceData_OnHost.raw.GridIndicesStart_Device, sizeof(int) * GRID_SIZE);
+    cudaMemset(DeviceData_OnHost.raw.GridIndicesStart_Device, -1, sizeof(int) * GRID_SIZE);
+    cudaMalloc((void**)&DeviceData_OnHost.raw.GridIndicesEnd_Device, sizeof(int) * GRID_SIZE);
+    cudaMemset(DeviceData_OnHost.raw.GridIndicesEnd_Device, -1, sizeof(int) * GRID_SIZE);
 
     cudaMalloc((void**)&DeviceData_OnHost.raw.TriangleIndices_Device, sizeof(int) * DeviceData_OnHost.VertexCount / 3);
+	std::vector<int> InitTriangleIndices(DeviceData_OnHost.VertexCount / 3);
+    for (int i = 0; i < DeviceData_OnHost.VertexCount / 3;i++)
+    {
+        InitTriangleIndices[i] = i;
+    }
+	cudaMemcpy(DeviceData_OnHost.raw.TriangleIndices_Device, InitTriangleIndices.data(), sizeof(int) * DeviceData_OnHost.VertexCount / 3, cudaMemcpyHostToDevice);
 
 	cudaMalloc((void**)OutData_Device, sizeof(StaticMeshData_Device));
     cudaMemcpy(*OutData_Device, &DeviceData_OnHost, sizeof(StaticMeshData_Device), cudaMemcpyHostToDevice);
@@ -141,6 +150,6 @@ void CreateDeviceObject(StaticMeshData_Device** OutData_Device, StaticMeshData_D
 }
 
 StaticMeshData_Device::StaticMeshData_Device(unsigned int VCount, glm::vec3 InBoxMin, glm::vec3 InBoxMax)
-    :VertexCount(VCount), boxMin(InBoxMin), boxMax(InBoxMax)
+    :VertexCount(VCount), boxMin(InBoxMin), boxMax(InBoxMax), raw()
 {
 }

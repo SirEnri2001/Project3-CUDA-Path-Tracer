@@ -152,6 +152,57 @@ __host__ __device__ float boxIntersectionTest(
     return -1;
 }
 
+__host__ __device__ float UniformBoxIntersectionTest(
+    Ray q,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal,
+    bool& outside)
+{
+    float tmin = -1e38f;
+    float tmax = 1e38f;
+    glm::vec3 tmin_n;
+    glm::vec3 tmax_n;
+    for (int xyz = 0; xyz < 3; ++xyz)
+    {
+        float qdxyz = q.direction[xyz];
+        /*if (glm::abs(qdxyz) > 0.00001f)*/
+        {
+            float t1 = (0.f - q.origin[xyz]) / qdxyz;
+            float t2 = (1.f - q.origin[xyz]) / qdxyz;
+            float ta = glm::min(t1, t2);
+            float tb = glm::max(t1, t2);
+            glm::vec3 n;
+            n[xyz] = t2 < t1 ? +1 : -1;
+            if (ta > 0 && ta > tmin)
+            {
+                tmin = ta;
+                tmin_n = n;
+            }
+            if (tb < tmax)
+            {
+                tmax = tb;
+                tmax_n = n;
+            }
+        }
+    }
+
+    if (tmax >= tmin && tmax > 0)
+    {
+        outside = true;
+        if (tmin <= 0)
+        {
+            tmin = tmax;
+            tmin_n = tmax_n;
+            outside = false;
+        }
+        intersectionPoint = getPointOnRay(q, tmin);
+        normal = glm::normalize(tmin_n);
+        return tmin;
+    }
+    return -1;
+}
+
+
 __host__ __device__ float sphereIntersectionTest(
     Geom sphere,
     Ray r,
@@ -310,4 +361,186 @@ __host__ __device__ float meshIntersectionTest(
     IntersectNor_World = glm::normalize(multiplyMV(mesh.invTranspose, glm::vec4(IntersectNor_Local, 0.0f)));
     minDistance = glm::length(ray_World.origin - IntersectPos_World);
 	return minDistance;
+}
+
+__device__ int GetPointBoundNextLayer(glm::vec3 p)
+{
+    int bound = 0;
+    if (p.x>=0.5f)
+    {
+        bound += 1;
+    }
+    if (p.y>=0.5f)
+    {
+        bound += 2;
+	}
+    if (p.z>=0.5f)
+    {
+        bound += 4;
+	}
+    return bound;
+}
+
+__device__ int GetPointBoundIndex(glm::vec3 p1, int layer) // p1 within [0,1]
+{
+    int bound = -1;
+    while (layer < GRID_LAYERS)
+    {
+        int boundP1 = GetPointBoundNextLayer(p1);
+        bound = 8 * (bound + 1) + boundP1;
+        p1 = glm::fract(p1 * 2.f);
+        layer++;
+    }
+    return bound;
+}
+
+__device__ float IntersectBoundingBoxLayer(
+    glm::vec3& debug,
+    const Geom& MeshGeom,
+    Ray InRayWorld, glm::vec3& IntersectPos_World,
+    glm::vec3& IntersectNor_World, 
+    int layer, 
+    StaticMeshData_Device* dev_staticMeshes)
+{
+    Ray ray_Local;
+    ray_Local.origin = multiplyMV(MeshGeom.inverseTransform, glm::vec4(InRayWorld.origin, 1.0f));
+    ray_Local.direction = glm::normalize(multiplyMV(MeshGeom.inverseTransform, glm::vec4(InRayWorld.direction, 0.0f)));
+
+	// calculate the first box intersected by the ray in the given layer
+
+	// step 1: transform ray according to boxMin and boxMax
+    Ray BoundSpaceRay = ray_Local;
+    BoundSpaceRay.origin -= dev_staticMeshes->boxMin;
+    BoundSpaceRay.origin /= (dev_staticMeshes->boxMax - dev_staticMeshes->boxMin);
+    BoundSpaceRay.direction /= (dev_staticMeshes->boxMax - dev_staticMeshes->boxMin);
+    BoundSpaceRay.direction = glm::normalize(BoundSpaceRay.direction);
+    int GridDim = 1 << layer; // 2^layer
+	float InvGridDim = 1.f / GridDim;
+
+    bool bOutsize = false;
+	glm::vec3 tempPos, tempNor;
+    float temp_t;
+    int maxSteps = 1;
+    debug = glm::vec3(0.f, 1.f, 0.f);
+    while (maxSteps)
+    {
+		maxSteps--;
+        // step 2: march ray to the bound if it is outside the bound
+        temp_t = UniformBoxIntersectionTest(
+            BoundSpaceRay,
+            tempPos,
+            tempNor,
+            bOutsize
+        );
+        if (temp_t < 0.f)
+        {
+            // the ray is not intersect with the bounding box
+            debug = glm::vec3(1.f, 0.f, 0.f);
+            return -1.f;
+        }
+        if (bOutsize)
+        {
+            BoundSpaceRay.origin = tempPos + temp_t * BoundSpaceRay.direction * 0.01f * InvGridDim; // march a bit
+        }
+
+        // step 3: check current bounding if intersect with any triangle
+        int boundIndex = GetPointBoundIndex(BoundSpaceRay.origin, layer);
+        int startTriangleIndex = dev_staticMeshes->raw.GridIndicesStart_Device[boundIndex + 1];
+        int endTriangleIndex = dev_staticMeshes->raw.GridIndicesEnd_Device[boundIndex + 1];
+		int triangleCount = endTriangleIndex - startTriangleIndex;
+        debug = glm::vec3(0.f, 0.f, triangleCount / 16.f);
+        if (triangleCount > 0 && startTriangleIndex!=-1)
+        {
+            float minDistance = -1.f;
+            glm::vec3 IntersectPos_Local;
+            glm::vec3 IntersectNor_Local;
+            glm::vec3 Pos_Temp;
+            glm::vec3 Nor_Temp;
+            bool front;
+            float t_min = FLT_MAX;
+            float t;
+            for (int i = 0; i < triangleCount; i++)
+            {
+                int triangleId = dev_staticMeshes->raw.TriangleIndices_Device[startTriangleIndex + i];
+                // test each triangle in the mesh
+                t = triangleIntersectionTest(
+                    dev_staticMeshes->raw.VertexPosition_Device[3 * triangleId + 0],
+                    dev_staticMeshes->raw.VertexPosition_Device[3 * triangleId + 1],
+                    dev_staticMeshes->raw.VertexPosition_Device[3 * triangleId + 2],
+                    ray_Local,
+                    Pos_Temp,
+                    Nor_Temp,
+                    front
+                );
+                if (t > 0.f && t < t_min)
+                {
+                    t_min = glm::min(t, t_min);
+                    IntersectPos_Local = Pos_Temp;
+                    IntersectNor_Local = Nor_Temp;
+                }
+            }
+            if (t_min != FLT_MAX)
+            {
+                IntersectPos_World = multiplyMV(MeshGeom.transform, glm::vec4(IntersectPos_Local, 1.0f));
+                IntersectNor_World = glm::normalize(multiplyMV(MeshGeom.invTranspose, glm::vec4(IntersectNor_Local, 0.0f)));
+                minDistance = glm::length(InRayWorld.origin - IntersectPos_World);
+                return minDistance;
+            }
+        }
+
+        // step 4: march to next bounding box
+        Ray GridSpaceRay = BoundSpaceRay;
+        GridSpaceRay.origin *= GridDim;
+        GridSpaceRay.origin = glm::fract(GridSpaceRay.origin);
+        temp_t = UniformBoxIntersectionTest(
+            GridSpaceRay,
+            tempPos,
+            tempNor,
+            bOutsize
+        );
+        BoundSpaceRay.origin += temp_t * InvGridDim * BoundSpaceRay.direction * 1.01f; // march a bit
+    }
+}
+
+__device__ float meshIntersectionTest_Optimized(
+    glm::vec3& debug,
+    Geom mesh, StaticMeshData_Device* dev_staticMeshes,
+    Ray ray_World,
+    glm::vec3& IntersectPos_World,
+    glm::vec3& IntersectNor_World)
+{
+    // first intersect with the bounding box
+    glm::vec3 tempPos, tempNor;
+    //bool bOutside;
+    //float t_box = boxIntersectionTest(
+    //    mesh,
+    //    ray_World,
+    //    tempPos,
+    //    tempNor,
+    //    bOutside
+    //);
+    //if (t_box < 0.f)
+    //{
+    //    return -1.f;
+    //}
+    // then intersect with the octree
+    float t_mesh;
+    for (int curLayer = 0; curLayer < 1; curLayer++)
+    {
+        t_mesh = IntersectBoundingBoxLayer(
+            debug, 
+            mesh,
+            ray_World,
+            IntersectPos_World,
+            IntersectNor_World,
+            curLayer,
+            dev_staticMeshes
+        );
+        if (t_mesh > 0.f)
+        {
+            return t_mesh;
+		}
+    }
+    
+    return -1;
 }

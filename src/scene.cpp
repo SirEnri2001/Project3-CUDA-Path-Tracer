@@ -80,6 +80,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
         }else if (type=="mesh")
         {
             newGeom.type = MESH;
+            mesh = p["MESH"];
         }else
         {
             newGeom.type = CUBE;

@@ -62,7 +62,7 @@ static int* device_pathAlive = nullptr;
 static StaticMeshData_Device* host_object_staticMeshData;
 static StaticMeshData_Device* device_staticMeshData;
 static StaticMeshData_Host staticMeshData;
-std::string MeshPath = "../models/cube.obj";
+std::string MeshPathRoot = "../models/";
 
 
 void InitDataContainer(GuiDataContainer* imGuiData)
@@ -78,6 +78,33 @@ void pathtraceNewFrame(Scene* scene)
 	cudaMemset(dev_path_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 	cudaMemset(device_path_matIds, -1, pixelcount * sizeof(int));
 	cudaMemset(device_pathAlive, -1, pixelcount * sizeof(int));
+}
+
+__global__ void calculateGridStartEndIndices(int triangleSize, int* InSortedGridIndices, int* OutGridIndicesStart, int* OutGridIndicesEnd)
+{
+	int triangleId = (blockIdx.x * blockDim.x) + threadIdx.x;
+	if (triangleId > triangleSize - 1)
+	{
+		return;
+	}
+	int index1 = InSortedGridIndices[triangleId];
+
+	if (triangleId == triangleSize - 1)
+	{
+		OutGridIndicesEnd[index1 + 1] = triangleSize;
+		return;
+	}
+	int index2 = InSortedGridIndices[triangleId + 1];
+	if (triangleId == 0)
+	{
+		OutGridIndicesStart[0] = 0;
+	}
+	if (index1 != index2)
+	{
+		// plus one because grid index start with -1
+		OutGridIndicesStart[index2 + 1] = triangleId + 1;
+		OutGridIndicesEnd[index1 + 1] = triangleId + 1;
+	}
 }
 
 void pathtraceCreate(Scene* scene)
@@ -125,7 +152,7 @@ void pathtraceCreate(Scene* scene)
 	cudaMemset(device_pathAlive, -1, pixelcount * sizeof(int));
 	checkCUDAError("pathtraceInit");
 
-	ReadObjMesh(staticMeshData, MeshPath);
+	ReadObjMesh(staticMeshData, MeshPathRoot+scene->mesh+".obj");
 	host_object_staticMeshData = new StaticMeshData_Device(staticMeshData.VertexCount, staticMeshData.boxMin, staticMeshData.boxMax);
 	CreateDeviceObject(&device_staticMeshData, *host_object_staticMeshData, staticMeshData);
 
@@ -135,9 +162,24 @@ void pathtraceCreate(Scene* scene)
 	Grid.x = (staticMeshData.VertexCount / 3 + BlockSize.x - 1) / BlockSize.x;
 	calculateMeshGridSpeedup << <Grid, BlockSize >> > (device_staticMeshData);
 	checkCUDAError("calculateMeshGridSpeedup");
-	int* indices = new int[staticMeshData.VertexCount];
-	cudaMemcpy(indices, host_object_staticMeshData->raw.TraingleToGridIndices_Device, sizeof(int)* staticMeshData.VertexCount, cudaMemcpyDeviceToHost);
-	for (int i = 0; i < staticMeshData.VertexCount / 3; i++)
+
+	auto tuple = thrust::make_tuple(host_object_staticMeshData->raw.TraingleToGridIndices_Device, host_object_staticMeshData->raw.TriangleIndices_Device);
+	thrust::sort_by_key(
+		thrust::device,
+		host_object_staticMeshData->raw.TraingleToGridIndices_Device,
+		host_object_staticMeshData->raw.TraingleToGridIndices_Device + staticMeshData.VertexCount / 3,
+		thrust::make_zip_iterator(tuple));
+	checkCUDAError("calculateMeshGridSpeedup");
+	calculateGridStartEndIndices<<<Grid, BlockSize>>>(
+		staticMeshData.VertexCount / 3, 
+		host_object_staticMeshData->raw.TraingleToGridIndices_Device,
+		host_object_staticMeshData->raw.GridIndicesStart_Device,
+		host_object_staticMeshData->raw.GridIndicesEnd_Device);
+	checkCUDAError("calculateMeshGridSpeedup");
+	int* indices = new int[GRID_SIZE];
+	cudaMemcpy(indices, host_object_staticMeshData->raw.GridIndicesStart_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
+	checkCUDAError("calculateMeshGridSpeedup");
+	for (int i = 0; i < GRID_SIZE; i++)
 	{
 		std::cout << indices[i] << ", ";
 		if (i%20==0)
@@ -145,7 +187,19 @@ void pathtraceCreate(Scene* scene)
 			std::cout << std::endl;
 		}
 	}
+	std::cout << "============" << std::endl;
+	cudaMemcpy(indices, host_object_staticMeshData->raw.GridIndicesEnd_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
+	checkCUDAError("calculateMeshGridSpeedup");
+	for (int i = 0; i < GRID_SIZE; i++)
+	{
+		std::cout << indices[i] << ", ";
+		if (i % 20 == 0)
+		{
+			std::cout << std::endl;
+		}
+	}
 }
+
 
 void pathtraceFree()
 {
@@ -204,7 +258,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 	// --- PathSegment Tracing Stage ---
 	// Shoot ray into scene, bounce between objects, push shading chunks
 	std::cout << "New Frame" << std::endl;
-	for (int i = 0; i < iter; i++)
+	for (int i = 0; i < 1; i++)
 	{
 		// clean shading chunks
 		cudaMemset(dev_path_intersections, 0, pixelcount * sizeof(ShadeableIntersection));

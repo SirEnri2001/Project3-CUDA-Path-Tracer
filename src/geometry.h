@@ -77,3 +77,10 @@ __host__ __device__ float meshIntersectionTest(
     Ray ray_World,
     glm::vec3& IntersectPos_World,
     glm::vec3& IntersectNor_World);
+__device__ int GetPointBoundNextLayer(glm::vec3 p);
+__device__ float meshIntersectionTest_Optimized(
+    glm::vec3& debug,
+    Geom mesh, StaticMeshData_Device* dev_staticMeshes,
+    Ray ray_World,
+    glm::vec3& IntersectPos_World,
+    glm::vec3& IntersectNor_World);

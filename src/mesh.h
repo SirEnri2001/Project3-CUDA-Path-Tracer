@@ -5,13 +5,14 @@
 #include <glm/glm.hpp>
 #include <thrust/device_vector.h>
 
-#define GRID_SIZE 4096
+#define GRID_SIZE 4681
 #define GRID_WIDTH 16
-
+#define GRID_LAYERS 4
+// 2^4==16, 8^0+8^1+8^2+8^3+8^4=4681
 struct StaticMeshData_Host
 {
-	glm::vec3 boxMin = glm::vec3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
-	glm::vec3 boxMax = glm::vec3(FLT_MAX, FLT_MAX, FLT_MAX);
+	glm::vec3 boxMin = glm::vec3(FLT_MAX, FLT_MAX, FLT_MAX);
+	glm::vec3 boxMax = glm::vec3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
 	glm::vec3* VertexPosition_Host;
 	glm::vec3* VertexNormal_Host;
 	glm::vec3* VertexColor_Host;
