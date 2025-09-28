@@ -87,8 +87,8 @@
         {
             "TYPE":"mesh",
             "MATERIAL":"specular_white",
-            "MESH":"cube",
-            "TRANS":[-4.0,4.0,1.0],
+            "MESH":"bunny",
+            "TRANS":[0.0,4.0,0.0],
             "ROTAT":[0.0,0.0,0.0],
             "SCALE":[20.0,20.0,20.0]
         }

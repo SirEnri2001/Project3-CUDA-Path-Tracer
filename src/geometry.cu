@@ -384,12 +384,13 @@ __device__ int GetPointBoundNextLayer(glm::vec3 p)
 __device__ int GetPointBoundIndex(glm::vec3 p1, int layer) // p1 within [0,1]
 {
     int bound = -1;
-    while (layer < GRID_LAYERS)
+	int l = 0;
+    while (l < layer)
     {
         int boundP1 = GetPointBoundNextLayer(p1);
         bound = 8 * (bound + 1) + boundP1;
         p1 = glm::fract(p1 * 2.f);
-        layer++;
+        l++;
     }
     return bound;
 }
@@ -420,7 +421,7 @@ __device__ float IntersectBoundingBoxLayer(
     bool bOutsize = false;
 	glm::vec3 tempPos, tempNor;
     float temp_t;
-    int maxSteps = 1;
+    int maxSteps = 20;
     debug = glm::vec3(0.f, 1.f, 0.f);
     while (maxSteps)
     {
@@ -440,7 +441,7 @@ __device__ float IntersectBoundingBoxLayer(
         }
         if (bOutsize)
         {
-            BoundSpaceRay.origin = tempPos + temp_t * BoundSpaceRay.direction * 0.01f * InvGridDim; // march a bit
+            BoundSpaceRay.origin = tempPos + BoundSpaceRay.direction * 0.01f * InvGridDim; // march a bit
         }
 
         // step 3: check current bounding if intersect with any triangle
@@ -448,7 +449,6 @@ __device__ float IntersectBoundingBoxLayer(
         int startTriangleIndex = dev_staticMeshes->raw.GridIndicesStart_Device[boundIndex + 1];
         int endTriangleIndex = dev_staticMeshes->raw.GridIndicesEnd_Device[boundIndex + 1];
 		int triangleCount = endTriangleIndex - startTriangleIndex;
-        debug = glm::vec3(0.f, 0.f, triangleCount / 16.f);
         if (triangleCount > 0 && startTriangleIndex!=-1)
         {
             float minDistance = -1.f;
@@ -500,6 +500,7 @@ __device__ float IntersectBoundingBoxLayer(
         );
         BoundSpaceRay.origin += temp_t * InvGridDim * BoundSpaceRay.direction * 1.01f; // march a bit
     }
+    return -1.f;
 }
 
 __device__ float meshIntersectionTest_Optimized(
@@ -509,8 +510,6 @@ __device__ float meshIntersectionTest_Optimized(
     glm::vec3& IntersectPos_World,
     glm::vec3& IntersectNor_World)
 {
-    // first intersect with the bounding box
-    glm::vec3 tempPos, tempNor;
     //bool bOutside;
     //float t_box = boxIntersectionTest(
     //    mesh,
@@ -524,23 +523,30 @@ __device__ float meshIntersectionTest_Optimized(
     //    return -1.f;
     //}
     // then intersect with the octree
-    float t_mesh;
-    for (int curLayer = 0; curLayer < 1; curLayer++)
+    float t_min = FLT_MAX;
+    float t;
+	glm::vec3 tempNor, tempPos;
+    for (int curLayer = 0; curLayer < GRID_LAYERS; curLayer++)
     {
-        t_mesh = IntersectBoundingBoxLayer(
+        t = IntersectBoundingBoxLayer(
             debug, 
             mesh,
             ray_World,
-            IntersectPos_World,
-            IntersectNor_World,
+            tempPos,
+            tempNor,
             curLayer,
             dev_staticMeshes
         );
-        if (t_mesh > 0.f)
+        if (t > 0.f && t < t_min)
         {
-            return t_mesh;
+            t_min = t;
+            IntersectNor_World = tempNor;
+            IntersectPos_World = tempPos;
 		}
     }
-    
+    if (t_min!=FLT_MAX)
+    {
+        return t_min;
+    }
     return -1;
 }

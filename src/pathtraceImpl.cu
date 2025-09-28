@@ -11,7 +11,7 @@
 __device__ int GetTriangleBound(glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, int layer) // p1 p2 p3 within [0,1]
 {
 	int bound = -1;
-    while (layer < 4)
+    while (layer < GRID_LAYERS - 1)
     {
         int boundP1 = GetPointBoundNextLayer(p1);
         int boundP2 = GetPointBoundNextLayer(p2);
@@ -123,7 +123,7 @@ __device__ float getIntersectionGeometryIndex(
             t = planeIntersectionTest(geom, InRayWorld, IntersectPos_World, IntersectNor_World, outside);
         }else if (geom.type==MESH && dev_staticMeshes!=nullptr)
         {
-			//t = meshIntersectionTest_Optimized(debug, geom, dev_staticMeshes, InRayWorld, IntersectPos_World, IntersectNor_World);
+			t = meshIntersectionTest_Optimized(debug, geom, dev_staticMeshes, InRayWorld, IntersectPos_World, IntersectNor_World);
         }
         // Compute the minimum t from the intersection tests to determine what
         // scene geometry object was hit first.
