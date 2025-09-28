@@ -1,4 +1,7 @@
+#pragma once
+
 #include <cuda_runtime_api.h>
+#include <glm/detail/type_vec.hpp>
 struct StaticMeshData_Device;
 struct Camera;
 struct Material;
@@ -18,3 +21,4 @@ __global__ void generateRayFromIntersections(int iter, int numPaths,
     Material* inMaterial, int geomSize, Geom* geoms, Geom* light_geoms, 
     int* dev_pathAlive, StaticMeshData_Device* mesh);
 __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, PathSegment* pathSegments, int* dev_pathAlive);
+__global__ void calculateMeshGridSpeedup(StaticMeshData_Device* InMeshData);

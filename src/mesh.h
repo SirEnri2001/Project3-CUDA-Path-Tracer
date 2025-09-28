@@ -3,12 +3,15 @@
 #include <cuda_runtime_api.h>
 #include <string>
 #include <glm/glm.hpp>
+#include <thrust/device_vector.h>
 
 #define GRID_SIZE 4096
 #define GRID_WIDTH 16
 
 struct StaticMeshData_Host
 {
+	glm::vec3 boxMin = glm::vec3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+	glm::vec3 boxMax = glm::vec3(FLT_MAX, FLT_MAX, FLT_MAX);
 	glm::vec3* VertexPosition_Host;
 	glm::vec3* VertexNormal_Host;
 	glm::vec3* VertexColor_Host;
@@ -36,40 +39,29 @@ struct StaticMeshData_Host
 	}
 };
 
-struct StaticMeshData_Device
+
+class StaticMeshData_Device
 {
-	glm::vec3* VertexPosition_Device;
-	glm::vec3* VertexNormal_Device;
-	glm::vec3* VertexColor_Device;
-	glm::vec2* VertexTexCoord_Device;
-	int* VertexGridIndices_Device;
-	int* GridIndicesStart_Device;
-	int* GridIndicesEnd_Device;
-	unsigned int* Indices_Device;
+public:
 	unsigned int VertexCount;
-	StaticMeshData_Device() : VertexPosition_Device(nullptr), VertexNormal_Device(nullptr), VertexColor_Device(nullptr), VertexCount(0), Indices_Device(nullptr), VertexTexCoord_Device(nullptr) {}
+	glm::vec3 boxMin;
+	glm::vec3 boxMax;
+	struct Raw
+	{
+		glm::vec3* VertexPosition_Device;
+		glm::vec3* VertexNormal_Device;
+		glm::vec3* VertexColor_Device;
+		glm::vec2* VertexTexCoord_Device;
+		int* TraingleToGridIndices_Device;
+		int* TriangleIndices_Device;
+		int* GridIndicesStart_Device;
+		int* GridIndicesEnd_Device;
+		unsigned int* Indices_Device;
+	} raw;
+
+	StaticMeshData_Device(unsigned int VCount, glm::vec3 InBoxMin, glm::vec3 InBoxMax);
 	~StaticMeshData_Device()
 	{
-		if (VertexPosition_Device)
-		{
-			cudaFree(VertexPosition_Device);
-			VertexPosition_Device = nullptr;
-		}
-		if (VertexNormal_Device)
-		{
-			cudaFree(VertexNormal_Device);
-			VertexNormal_Device = nullptr;
-		}
-		if (VertexColor_Device)
-		{
-			cudaFree(VertexColor_Device);
-			VertexColor_Device = nullptr;
-		}
-		if (Indices_Device)
-		{
-			cudaFree(Indices_Device);
-			Indices_Device = nullptr;
-		}
 	}
 };
 

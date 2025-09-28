@@ -79,7 +79,7 @@ set(sources
     src/common.cu
     src/pathtraceImpl.cu
     src/geometry.cu
-    src/mesh.cpp
+    src/mesh.cu
 )
 
 set(imgui_headers

@@ -51,6 +51,9 @@ void ReadObjMesh(StaticMeshData_Host& OutData_Host, std::string	FilePath)
                 tinyobj::real_t vy = attrib.vertices[3 * size_t(idx.vertex_index) + 1];
                 tinyobj::real_t vz = attrib.vertices[3 * size_t(idx.vertex_index) + 2];
 
+				OutData_Host.boxMin = glm::min(OutData_Host.boxMin, glm::vec3(vx, vy, vz));
+				OutData_Host.boxMax = glm::max(OutData_Host.boxMax, glm::vec3(vx, vy, vz));
+
 				OutData_Host.VertexPosition_Host[3 * f + v] = glm::vec3(vx, vy, vz);
 				OutData_Host.Indices_Host[3 * f + v] = 3 * f + v;
 
@@ -83,26 +86,61 @@ void ReadObjMesh(StaticMeshData_Host& OutData_Host, std::string	FilePath)
 }
 
 
+inline glm::vec3* RetrievePointer(thrust::device_vector<glm::vec3>& dv)
+{
+    return thrust::raw_pointer_cast(dv.data());
+}
+
+inline glm::vec2* RetrievePointer(thrust::device_vector<glm::vec2>& dv)
+{
+    return thrust::raw_pointer_cast(dv.data());
+}
+
+inline unsigned int* RetrievePointer(thrust::device_vector<unsigned int>& dv)
+{
+    return thrust::raw_pointer_cast(dv.data());
+}
+
+inline int* RetrievePointer(thrust::device_vector<int>& dv)
+{
+    return thrust::raw_pointer_cast(dv.data());
+}
+
 void CreateDeviceObject(StaticMeshData_Device** OutData_Device, StaticMeshData_Device& DeviceData_OnHost, StaticMeshData_Host& InData_Host)
 {
+    checkCUDAError("before CreateDeviceObject");
     DeviceData_OnHost.VertexCount = InData_Host.VertexCount;
-    cudaMalloc((void**)&DeviceData_OnHost.VertexPosition_Device, sizeof(glm::vec3) * DeviceData_OnHost.VertexCount);
-    cudaMemcpy(DeviceData_OnHost.VertexPosition_Device, InData_Host.VertexPosition_Host, sizeof(glm::vec3) * DeviceData_OnHost.VertexCount, cudaMemcpyHostToDevice);
-    cudaMalloc((void**)&DeviceData_OnHost.VertexTexCoord_Device, sizeof(glm::vec3) * DeviceData_OnHost.VertexCount);
-    cudaMemcpy(DeviceData_OnHost.VertexTexCoord_Device, InData_Host.VertexTexCoord_Host, sizeof(glm::vec2) * DeviceData_OnHost.VertexCount, cudaMemcpyHostToDevice);
-    cudaMalloc((void**)&DeviceData_OnHost.VertexNormal_Device, sizeof(glm::vec3) * DeviceData_OnHost.VertexCount);
-    cudaMemcpy(DeviceData_OnHost.VertexNormal_Device, InData_Host.VertexNormal_Host, sizeof(glm::vec3) * DeviceData_OnHost.VertexCount, cudaMemcpyHostToDevice);
-    cudaMalloc((void**)&DeviceData_OnHost.VertexColor_Device, sizeof(glm::vec3) * DeviceData_OnHost.VertexCount);
-    cudaMemcpy(DeviceData_OnHost.VertexColor_Device, InData_Host.VertexColor_Host, sizeof(glm::vec3) * DeviceData_OnHost.VertexCount, cudaMemcpyHostToDevice);
-    cudaMalloc((void**)&DeviceData_OnHost.Indices_Device, sizeof(unsigned int) * DeviceData_OnHost.VertexCount);
-    cudaMemcpy(DeviceData_OnHost.Indices_Device, InData_Host.Indices_Host, sizeof(unsigned int) * DeviceData_OnHost.VertexCount, cudaMemcpyHostToDevice);
-    cudaMalloc((void**)&DeviceData_OnHost.VertexGridIndices_Device, sizeof(int) * DeviceData_OnHost.VertexCount);
-    cudaMemset(DeviceData_OnHost.VertexGridIndices_Device, -1, sizeof(int) * DeviceData_OnHost.VertexCount);
-    cudaMalloc((void**)&DeviceData_OnHost.GridIndicesStart_Device, sizeof(int) * GRID_SIZE);
-    
-	cudaMalloc((void**)&DeviceData_OnHost.GridIndicesEnd_Device, sizeof(int) * GRID_SIZE);
+	DeviceData_OnHost.boxMin = InData_Host.boxMin;
+	DeviceData_OnHost.boxMax = InData_Host.boxMax;
 
-    cudaMalloc((void**)OutData_Device, sizeof(StaticMeshData_Device));
-	cudaMemcpy(*OutData_Device, &DeviceData_OnHost, sizeof(StaticMeshData_Device), cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&DeviceData_OnHost.raw.VertexPosition_Device, sizeof(glm::vec3) * DeviceData_OnHost.VertexCount);
+    cudaMemcpy(DeviceData_OnHost.raw.VertexPosition_Device, InData_Host.VertexPosition_Host, sizeof(glm::vec3) * DeviceData_OnHost.VertexCount, cudaMemcpyHostToDevice);
+
+	cudaMalloc((void**)&DeviceData_OnHost.raw.VertexTexCoord_Device, sizeof(glm::vec3) * DeviceData_OnHost.VertexCount);
+    cudaMemcpy(DeviceData_OnHost.raw.VertexTexCoord_Device, InData_Host.VertexTexCoord_Host, sizeof(glm::vec2) * DeviceData_OnHost.VertexCount, cudaMemcpyHostToDevice);
+
+	cudaMalloc((void**)&DeviceData_OnHost.raw.VertexNormal_Device, sizeof(glm::vec3) * DeviceData_OnHost.VertexCount);
+    cudaMemcpy(DeviceData_OnHost.raw.VertexNormal_Device, InData_Host.VertexNormal_Host, sizeof(glm::vec3) * DeviceData_OnHost.VertexCount, cudaMemcpyHostToDevice);
+
+	cudaMalloc((void**)&DeviceData_OnHost.raw.VertexColor_Device, sizeof(glm::vec3) * DeviceData_OnHost.VertexCount);
+    cudaMemcpy(DeviceData_OnHost.raw.VertexColor_Device, InData_Host.VertexColor_Host, sizeof(glm::vec3) * DeviceData_OnHost.VertexCount, cudaMemcpyHostToDevice);
+
+	cudaMalloc((void**)&DeviceData_OnHost.raw.Indices_Device, sizeof(unsigned int) * DeviceData_OnHost.VertexCount);
+    cudaMemcpy(DeviceData_OnHost.raw.Indices_Device, InData_Host.Indices_Host, sizeof(unsigned int) * DeviceData_OnHost.VertexCount, cudaMemcpyHostToDevice);
+
+	cudaMalloc((void**)&DeviceData_OnHost.raw.TraingleToGridIndices_Device, sizeof(int) * DeviceData_OnHost.VertexCount);
+    cudaMemset(DeviceData_OnHost.raw.TraingleToGridIndices_Device, -1, sizeof(int) * DeviceData_OnHost.VertexCount / 3);
+
+	cudaMalloc((void**)&DeviceData_OnHost.raw.GridIndicesStart_Device, sizeof(int) * GRID_SIZE);
+
+    cudaMalloc((void**)&DeviceData_OnHost.raw.TriangleIndices_Device, sizeof(int) * DeviceData_OnHost.VertexCount / 3);
+
+	cudaMalloc((void**)OutData_Device, sizeof(StaticMeshData_Device));
+    cudaMemcpy(*OutData_Device, &DeviceData_OnHost, sizeof(StaticMeshData_Device), cudaMemcpyHostToDevice);
     checkCUDAError("CreateDeviceObject");
+}
+
+StaticMeshData_Device::StaticMeshData_Device(unsigned int VCount, glm::vec3 InBoxMin, glm::vec3 InBoxMax)
+    :VertexCount(VCount), boxMin(InBoxMin), boxMax(InBoxMax)
+{
 }

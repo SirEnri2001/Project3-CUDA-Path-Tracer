@@ -287,9 +287,9 @@ __host__ __device__ float meshIntersectionTest(
     {
 	    // test each triangle in the mesh
         t = triangleIntersectionTest(
-            dev_staticMeshes->VertexPosition_Device[i * 3 + 0],
-            dev_staticMeshes->VertexPosition_Device[i * 3 + 1],
-            dev_staticMeshes->VertexPosition_Device[i * 3 + 2],
+            dev_staticMeshes->raw.VertexPosition_Device[3 * i + 0],
+            dev_staticMeshes->raw.VertexPosition_Device[3 * i + 1],
+            dev_staticMeshes->raw.VertexPosition_Device[3 * i + 2],
             ray_Local,
             Pos_Temp,
             Nor_Temp,

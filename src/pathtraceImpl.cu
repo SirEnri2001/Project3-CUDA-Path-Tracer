@@ -44,7 +44,7 @@ __device__ int GetPointBoundNextLayer(glm::vec3 p)
 	}
 }
 
-__device__ int GetTriangleBound(glm::vec3 p1, glm::vec3 p2, glm::vec3 p3) // p1 p2 p3 within [0,1]
+__device__ int GetTriangleBound(glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, int layer) // p1 p2 p3 within [0,1]
 {
     float CurrentBoxSize = 1.f;
 	float halfBoxSize = 0.5f;
@@ -52,7 +52,7 @@ __device__ int GetTriangleBound(glm::vec3 p1, glm::vec3 p2, glm::vec3 p3) // p1 
 	int boundP1 = GetPointBoundNextLayer(p1);
 	int boundP2 = GetPointBoundNextLayer(p2);
 	int boundP3 = GetPointBoundNextLayer(p3);
-    if (boundP1!=boundP2 || boundP1 != boundP3)
+    if (boundP1!=boundP2 || boundP1 != boundP3 || layer==1)
     {
         return bound;
     }
@@ -60,25 +60,26 @@ __device__ int GetTriangleBound(glm::vec3 p1, glm::vec3 p2, glm::vec3 p3) // p1 
     p1 = glm::fract(p1 * 2.f);
 	p2 = glm::fract(p2 * 2.f);
 	p3 = glm::fract(p3 * 2.f);
-    return 8 * (bound + 1) + GetTriangleBound(p1, p2, p3);
+    return 8 * (bound + 1) + GetTriangleBound(p1, p2, p3, layer+1);
 }
 
-__global__ void calculateMeshGridSpeedup(StaticMeshData_Device* InMeshData, glm::vec3 boxMin, glm::vec3 boxMax)
+__global__ void calculateMeshGridSpeedup(StaticMeshData_Device* InMeshData)
 {
 	int triangleId = (blockIdx.x * blockDim.x) + threadIdx.x;
     if (triangleId >= InMeshData->VertexCount / 3)
     {
         return;
 	}
-    glm::vec3 p1 = InMeshData->VertexPosition_Device[triangleId * 3 + 0];
-    glm::vec3 p2 = InMeshData->VertexPosition_Device[triangleId * 3 + 1];
-    glm::vec3 p3 = InMeshData->VertexPosition_Device[triangleId * 3 + 2];
-
+    glm::vec3 p1 = InMeshData->raw.VertexPosition_Device[triangleId * 3 + 0];
+    glm::vec3 p2 = InMeshData->raw.VertexPosition_Device[triangleId * 3 + 1];
+    glm::vec3 p3 = InMeshData->raw.VertexPosition_Device[triangleId * 3 + 2];
+	glm::vec3 boxMin = InMeshData->boxMin;
+	glm::vec3 boxMax = InMeshData->boxMax;
 	p1 = (p1 - boxMin) / (boxMax - boxMin);
 	p2 = (p2 - boxMin) / (boxMax - boxMin);
     p3 = (p3 - boxMin) / (boxMax - boxMin);
-    int bound = GetTriangleBound(p1, p2, p3);
-	InMeshData->VertexGridIndices_Device[triangleId] = bound;
+    int bound = GetTriangleBound(p1, p2, p3, 0);
+	InMeshData->raw.TraingleToGridIndices_Device[triangleId] = bound;
 }
 
 /**

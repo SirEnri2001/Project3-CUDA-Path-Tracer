@@ -59,7 +59,7 @@ static PathSegment* dev_paths = NULL;
 static ShadeableIntersection* dev_path_intersections = NULL;
 static int* device_path_matIds = nullptr;
 static int* device_pathAlive = nullptr;
-static StaticMeshData_Device host_object_staticMeshData;
+static StaticMeshData_Device* host_object_staticMeshData;
 static StaticMeshData_Device* device_staticMeshData;
 static StaticMeshData_Host staticMeshData;
 std::string MeshPath = "../models/cube.obj";
@@ -126,7 +126,25 @@ void pathtraceCreate(Scene* scene)
 	checkCUDAError("pathtraceInit");
 
 	ReadObjMesh(staticMeshData, MeshPath);
-	CreateDeviceObject(&device_staticMeshData, host_object_staticMeshData, staticMeshData);
+	host_object_staticMeshData = new StaticMeshData_Device(staticMeshData.VertexCount, staticMeshData.boxMin, staticMeshData.boxMax);
+	CreateDeviceObject(&device_staticMeshData, *host_object_staticMeshData, staticMeshData);
+
+	dim3 Grid;
+	dim3 BlockSize;
+	BlockSize.x = 128;
+	Grid.x = (staticMeshData.VertexCount / 3 + BlockSize.x - 1) / BlockSize.x;
+	calculateMeshGridSpeedup << <Grid, BlockSize >> > (device_staticMeshData);
+	checkCUDAError("calculateMeshGridSpeedup");
+	int* indices = new int[staticMeshData.VertexCount];
+	cudaMemcpy(indices, host_object_staticMeshData->raw.TraingleToGridIndices_Device, sizeof(int)* staticMeshData.VertexCount, cudaMemcpyDeviceToHost);
+	for (int i = 0; i < staticMeshData.VertexCount / 3; i++)
+	{
+		std::cout << indices[i] << ", ";
+		if (i%20==0)
+		{
+			std::cout << std::endl;
+		}
+	}
 }
 
 void pathtraceFree()
