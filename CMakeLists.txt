@@ -63,6 +63,7 @@ set(headers
     src/geometry.h
     src/mesh.h
     src/MeshLoader/tiny_obj_loader.h
+    src/MeshLoader/tiny_gltf.h
 )
 
 set(sources
@@ -117,7 +118,9 @@ source_group("ImGui\\Sources" FILES ${imgui_sources})
 #add_subdirectory(src/ImGui)
 #add_subdirectory(stream_compaction)  # TODO: uncomment if using your stream compaction
 
-add_executable(${CMAKE_PROJECT_NAME} ${sources} ${headers} ${imgui_sources} ${imgui_headers})
+add_library(ImGuiPT STATIC  ${imgui_sources} ${imgui_headers})
+
+add_executable(${CMAKE_PROJECT_NAME} ${sources} ${headers})
 
 target_include_directories(
     ${CMAKE_PROJECT_NAME} PUBLIC
@@ -125,7 +128,7 @@ target_include_directories(
 )
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
-    ${GL_LIBRARIES}
+    ${GL_LIBRARIES} ImGuiPT
     #stream_compaction  # TODO: uncomment if using your stream compaction
 )
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)

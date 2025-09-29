@@ -32,7 +32,7 @@ __device__ int GetTriangleBound(glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, int la
     return bound;
 }
 
-__global__ void calculateMeshGridSpeedup(StaticMeshData_Device* InMeshData)
+__global__ void calculateMeshGridSpeedup(StaticMesh::RenderProxy* InMeshData)
 {
 	int triangleId = (blockIdx.x * blockDim.x) + threadIdx.x;
     if (triangleId >= InMeshData->VertexCount / 3)
@@ -48,7 +48,7 @@ __global__ void calculateMeshGridSpeedup(StaticMeshData_Device* InMeshData)
 	p2 = (p2 - boxMin) / (boxMax - boxMin);
     p3 = (p3 - boxMin) / (boxMax - boxMin);
     int bound = GetTriangleBound(p1, p2, p3, 0);
-	InMeshData->raw.TraingleToGridIndices_Device[triangleId] = bound;
+	InMeshData->raw.TriangleToGridIndices_Device[triangleId] = bound;
 }
 
 /**
@@ -97,7 +97,7 @@ __device__ float getIntersectionGeometryIndex(
     Ray& InRayWorld,
     int geoms_size,
 	Geom* geoms, 
-    StaticMeshData_Device* dev_staticMeshes
+    StaticMesh::RenderProxy* dev_staticMeshes
 )
 {
     float t = -1.0f;
@@ -152,7 +152,7 @@ __global__ void computeIntersections(
     Geom* geoms,
     int geoms_size,
     ShadeableIntersection* intersections,
-    int* device_materialIds, int* dev_pathAlive, StaticMeshData_Device* dev_staticMeshes)
+    int* device_materialIds, int* dev_pathAlive, StaticMesh::RenderProxy* dev_staticMeshes)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 	int path_index = dev_pathAlive[tid];
@@ -283,7 +283,7 @@ __device__ bool sampleLightFromIntersections(
     Geom& light_geom,
     int geomSize,
 	Geom* geoms,
-    StaticMeshData_Device* mesh,
+    StaticMesh::RenderProxy* mesh,
     thrust::default_random_engine& rng
 )
 {
@@ -313,7 +313,7 @@ __device__ bool sampleLightFromIntersections(
 
 __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContribution, 
     glm::vec3 In_p, glm::vec3 InViewDir, glm::vec3 InSurfaceNormal, Material& InSurfaceMat, 
-    Geom& InLightGeom, Material& InLightMat, int GeomSize, Geom* Geoms, StaticMeshData_Device* mesh,
+    Geom& InLightGeom, Material& InLightMat, int GeomSize, Geom* Geoms, StaticMesh::RenderProxy* mesh,
     thrust::default_random_engine& rng)
 {
     glm::vec3 directLight;
@@ -352,7 +352,7 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
 
 __global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
     PathSegment* pathSegments, ShadeableIntersection* dev_intersections,
-    Material* inMaterial, int geomSize, Geom* geoms, Geom* light_geoms, int* dev_pathAlive, StaticMeshData_Device* mesh)
+    Material* inMaterial, int geomSize, Geom* geoms, Geom* light_geoms, int* dev_pathAlive, StaticMesh::RenderProxy* mesh)
 {
     int tid = (blockIdx.x * blockDim.x) + threadIdx.x;
     int pathIndex = dev_pathAlive[tid];

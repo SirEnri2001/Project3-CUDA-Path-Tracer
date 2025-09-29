@@ -317,7 +317,7 @@ __host__ __device__ float triangleIntersectionTest(
 }
 
 __host__ __device__ float meshIntersectionTest(
-    Geom mesh, StaticMeshData_Device* dev_staticMeshes,
+    Geom mesh, StaticMesh::RenderProxy* dev_staticMeshes,
     Ray ray_World,
     glm::vec3& IntersectPos_World,
     glm::vec3& IntersectNor_World)
@@ -401,7 +401,7 @@ __device__ float IntersectBoundingBoxLayer(
     Ray InRayWorld, glm::vec3& IntersectPos_World,
     glm::vec3& IntersectNor_World, 
     int layer, 
-    StaticMeshData_Device* dev_staticMeshes)
+    StaticMesh::RenderProxy* dev_staticMeshes)
 {
     Ray ray_Local;
     ray_Local.origin = multiplyMV(MeshGeom.inverseTransform, glm::vec4(InRayWorld.origin, 1.0f));
@@ -518,7 +518,7 @@ __device__ float IntersectBoundingBoxLayer(
 
 __device__ float meshIntersectionTest_Optimized(
     glm::vec3& debug,
-    Geom mesh, StaticMeshData_Device* dev_staticMeshes,
+    Geom mesh, StaticMesh::RenderProxy* dev_staticMeshes,
     Ray ray_World,
     glm::vec3& IntersectPos_World,
     glm::vec3& IntersectNor_World)

@@ -1,6 +1,8 @@
 #pragma once
 #include <cuda_runtime_api.h>
 #include <thrust/random.h>
+
+#include "mesh.h"
 #include "glm/glm.hpp"
 #include "sceneStructs.h"
 
@@ -80,7 +82,7 @@ __host__ __device__ float meshIntersectionTest(
 __device__ int GetPointBoundNextLayer(glm::vec3 p);
 __device__ float meshIntersectionTest_Optimized(
     glm::vec3& debug,
-    Geom mesh, StaticMeshData_Device* dev_staticMeshes,
+    Geom mesh, StaticMesh::RenderProxy* dev_staticMeshes,
     Ray ray_World,
     glm::vec3& IntersectPos_World,
     glm::vec3& IntersectNor_World);

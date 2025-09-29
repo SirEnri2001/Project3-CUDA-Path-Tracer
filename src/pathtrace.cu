@@ -59,9 +59,6 @@ static PathSegment* dev_paths = NULL;
 static ShadeableIntersection* dev_path_intersections = NULL;
 static int* device_path_matIds = nullptr;
 static int* device_pathAlive = nullptr;
-static StaticMeshData_Device* host_object_staticMeshData;
-static StaticMeshData_Device* device_staticMeshData;
-static StaticMeshData_Host staticMeshData;
 std::string MeshPathRoot = "../models/";
 
 
@@ -152,32 +149,31 @@ void pathtraceCreate(Scene* scene)
 	cudaMemset(device_pathAlive, -1, pixelcount * sizeof(int));
 	checkCUDAError("pathtraceInit");
 
-	ReadObjMesh(staticMeshData, MeshPathRoot+scene->mesh+".obj");
-	host_object_staticMeshData = new StaticMeshData_Device(staticMeshData.VertexCount, staticMeshData.boxMin, staticMeshData.boxMax);
-	CreateDeviceObject(&device_staticMeshData, *host_object_staticMeshData, staticMeshData);
-
+	// load static mesh data
+	StaticMesh* Mesh = StaticMeshManager::Get()->LoadObj(hst_scene->mesh, MeshPathRoot + hst_scene->mesh + ".obj");
+	Mesh->CreateProxy();
 	dim3 Grid;
 	dim3 BlockSize;
 	BlockSize.x = 128;
-	Grid.x = (staticMeshData.VertexCount / 3 + BlockSize.x - 1) / BlockSize.x;
-	calculateMeshGridSpeedup << <Grid, BlockSize >> > (device_staticMeshData);
+	Grid.x = (Mesh->Data.VertexCount / 3 + BlockSize.x - 1) / BlockSize.x;
+	calculateMeshGridSpeedup << <Grid, BlockSize >> > (Mesh->Proxy_Device);
 	checkCUDAError("calculateMeshGridSpeedup");
 
-	auto tuple = thrust::make_tuple(host_object_staticMeshData->raw.TraingleToGridIndices_Device, host_object_staticMeshData->raw.TriangleIndices_Device);
+	auto tuple = thrust::make_tuple(Mesh->Proxy_Host->raw.TriangleToGridIndices_Device, Mesh->Proxy_Host->raw.TriangleIndices_Device);
 	thrust::sort_by_key(
 		thrust::device,
-		host_object_staticMeshData->raw.TraingleToGridIndices_Device,
-		host_object_staticMeshData->raw.TraingleToGridIndices_Device + staticMeshData.VertexCount / 3,
+		Mesh->Proxy_Host->raw.TriangleToGridIndices_Device,
+		Mesh->Proxy_Host->raw.TriangleToGridIndices_Device + Mesh->Data.VertexCount / 3,
 		thrust::make_zip_iterator(tuple));
 	checkCUDAError("calculateMeshGridSpeedup");
 	calculateGridStartEndIndices<<<Grid, BlockSize>>>(
-		staticMeshData.VertexCount / 3, 
-		host_object_staticMeshData->raw.TraingleToGridIndices_Device,
-		host_object_staticMeshData->raw.GridIndicesStart_Device,
-		host_object_staticMeshData->raw.GridIndicesEnd_Device);
+		Mesh->Data.VertexCount / 3,
+		Mesh->Proxy_Host->raw.TriangleToGridIndices_Device,
+		Mesh->Proxy_Host->raw.GridIndicesStart_Device,
+		Mesh->Proxy_Host->raw.GridIndicesEnd_Device);
 	checkCUDAError("calculateMeshGridSpeedup");
 	int* indices = new int[GRID_SIZE];
-	cudaMemcpy(indices, host_object_staticMeshData->raw.GridIndicesStart_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
+	cudaMemcpy(indices, Mesh->Proxy_Host->raw.GridIndicesStart_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
 	checkCUDAError("calculateMeshGridSpeedup");
 	for (int i = 0; i < GRID_SIZE; i++)
 	{
@@ -188,7 +184,7 @@ void pathtraceCreate(Scene* scene)
 		}
 	}
 	std::cout << "============" << std::endl;
-	cudaMemcpy(indices, host_object_staticMeshData->raw.GridIndicesEnd_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
+	cudaMemcpy(indices, Mesh->Proxy_Host->raw.GridIndicesEnd_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
 	checkCUDAError("calculateMeshGridSpeedup");
 	for (int i = 0; i < GRID_SIZE; i++)
 	{
@@ -265,6 +261,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 	// --- PathSegment Tracing Stage ---
 	// Shoot ray into scene, bounce between objects, push shading chunks
 	std::cout << "New Frame" << std::endl;
+	StaticMesh* Mesh = StaticMeshManager::Get()->GetMesh(hst_scene->mesh);
 	for (int i = 0; i < iter; i++)
 	{
 		// clean shading chunks
@@ -280,7 +277,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 				dev_geoms,
 				hst_scene->geoms.size(),
 				dev_path_intersections,
-				device_path_matIds, device_pathAlive, device_staticMeshData
+				device_path_matIds, device_pathAlive, Mesh->Proxy_Device
 			);
 		}
 		{
@@ -310,7 +307,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 		generateRayFromIntersections << <numblocksPathSegmentTracing, blockSize1d >> >(
 			iter, frame, num_paths, dev_path_begin,
 			dev_path_intersections, dev_materials,
-			hst_scene->geoms.size(), dev_geoms, device_light_geoms, device_pathAlive, device_staticMeshData);
+			hst_scene->geoms.size(), dev_geoms, device_light_geoms, device_pathAlive, Mesh->Proxy_Device);
 		depth++;
 		if (guiData != NULL)
 		{
