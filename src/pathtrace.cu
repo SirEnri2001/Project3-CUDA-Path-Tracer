@@ -258,7 +258,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 	// --- PathSegment Tracing Stage ---
 	// Shoot ray into scene, bounce between objects, push shading chunks
 	std::cout << "New Frame" << std::endl;
-	for (int i = 0; i < 1; i++)
+	for (int i = 0; i < iter; i++)
 	{
 		// clean shading chunks
 		cudaMemset(dev_path_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
