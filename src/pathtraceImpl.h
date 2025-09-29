@@ -16,7 +16,7 @@ __global__ void computeIntersections(
     int geoms_size,
     ShadeableIntersection* intersections,
     int* device_materialIds, int* dev_pathAlive, StaticMeshData_Device* mesh);
-__global__ void generateRayFromIntersections(int iter, int numPaths,
+__global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
     PathSegment* pathSegments, ShadeableIntersection* dev_intersections,
     Material* inMaterial, int geomSize, Geom* geoms, Geom* light_geoms, 
     int* dev_pathAlive, StaticMeshData_Device* mesh);

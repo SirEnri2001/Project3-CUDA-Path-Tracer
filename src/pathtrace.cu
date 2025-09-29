@@ -219,6 +219,13 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
 	if (index < nPaths)
 	{
 		PathSegment iterationPath = iterationPaths[index];
+		bool bInvalidVal;
+		bInvalidVal = glm::any(glm::isnan(iterationPath.Contribution));
+		bInvalidVal = bInvalidVal || glm::any(glm::isinf(iterationPath.Contribution));
+		if (bInvalidVal)
+		{
+			iterationPath.debug = glm::vec3(0, 1, 0);
+		}
 		if (debug)
 		{
 			iterationPath.Contribution = iterationPath.debug;
@@ -248,7 +255,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
 	// 1D block for path tracing
 	const int blockSize1d = 128;
-	generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(cam, iter, traceDepth, dev_paths, device_pathAlive);
+	generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(cam, frame, iter, dev_paths, device_pathAlive);
 	checkCUDAError("generate camera ray");
 	int depth = 0;
 	PathSegment* dev_path_end = dev_paths + pixelcount;
@@ -301,7 +308,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 		std::cout << "number of paths: " << num_paths << std::endl;
 		numblocksPathSegmentTracing = (total_paths + blockSize1d - 1) / blockSize1d;
 		generateRayFromIntersections << <numblocksPathSegmentTracing, blockSize1d >> >(
-			iter, num_paths, dev_path_begin,
+			iter, frame, num_paths, dev_path_begin,
 			dev_path_intersections, dev_materials,
 			hst_scene->geoms.size(), dev_geoms, device_light_geoms, device_pathAlive, device_staticMeshData);
 		depth++;

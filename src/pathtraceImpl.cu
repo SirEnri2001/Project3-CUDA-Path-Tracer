@@ -1,5 +1,6 @@
 #include "pathtraceImpl.h"
 
+#include "bsdf.h"
 #include "common.h"
 #include "geometry.h"
 #include "interactions.h"
@@ -7,6 +8,8 @@
 #include "sceneStructs.h"
 #include "utilities.h"
 #include "mesh.h"
+
+#define USE_MESH_GRID_ACCELERATION 1
 
 __device__ int GetTriangleBound(glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, int layer) // p1 p2 p3 within [0,1]
 {
@@ -123,7 +126,11 @@ __device__ float getIntersectionGeometryIndex(
             t = planeIntersectionTest(geom, InRayWorld, IntersectPos_World, IntersectNor_World, outside);
         }else if (geom.type==MESH && dev_staticMeshes!=nullptr)
         {
+#if USE_MESH_GRID_ACCELERATION
 			t = meshIntersectionTest_Optimized(debug, geom, dev_staticMeshes, InRayWorld, IntersectPos_World, IntersectNor_World);
+#else
+            t = meshIntersectionTest(geom, dev_staticMeshes, InRayWorld, IntersectPos_World, IntersectNor_World);
+#endif
         }
         // Compute the minimum t from the intersection tests to determine what
         // scene geometry object was hit first.
@@ -164,8 +171,8 @@ __global__ void computeIntersections(
     int hit_geom_index = -1;
     glm::vec3 intersect_point;
     glm::vec3 normal;
-
-    getIntersectionGeometryIndex(pathSegments[path_index].debug,
+    glm::vec3 debug;
+    getIntersectionGeometryIndex(debug,
         hit_geom_index, intersect_point, normal,
         pathSegment.ray, geoms_size, geoms, dev_staticMeshes);
 
@@ -192,28 +199,60 @@ __host__ __device__ float power_heuristic(float pdf_a, float pdf_b) {
     return a / (a + b);
 }
 
-__device__ void bsdfDiffuse(glm::vec3& outBSDF, float& outPDF, const Ray& in_wi, glm::vec3 surfaceNormal, Material* material)
+//__device__ void bsdfDiffuse(glm::vec3& outBSDF, float& outPDF, const Ray& in_wi, glm::vec3 surfaceNormal, Material* material)
+//{
+//    float absdot = glm::abs(glm::dot(in_wi.direction, surfaceNormal));
+//    float pdf = absdot * INV_PI;
+//	outPDF = pdf;
+//    outBSDF = material->color * INV_PI;
+//}
+//
+//__device__ void bsdfDiffuseSample(glm::vec3& outBSDF, float& outPDF, Ray& out_wi, glm::vec3 p,
+//    glm::vec3 surfaceNormal, Material* material,
+//    thrust::default_random_engine& rng)
+//{
+//    // set segment.ray.origin
+//    out_wi.origin = p;
+//    // set segment.ray.direction on random position
+//    out_wi.direction = calculateRandomDirectionInHemisphere(surfaceNormal, rng);
+//    bsdfDiffuse(outBSDF, outPDF, out_wi, surfaceNormal, material);
+//}
+
+__device__ void bsdfPBR(glm::vec3& outBSDF, 
+    float& outPDF,
+    const Material& material, 
+    glm::vec3 L /*Light direction*/, 
+    glm::vec3 V /*View direction*/, 
+    glm::vec3 N /*Normal*/)
 {
-    float absdot = glm::abs(glm::dot(in_wi.direction, surfaceNormal));
+    BRDF_Params params;
+	params.baseColor = material.color;
+    params.roughness = material.roughness;
+    float absdot = glm::abs(glm::dot(L, N));
     float pdf = absdot * INV_PI;
-	outPDF = pdf;
-    outBSDF = material->color * INV_PI;
+
+    glm::vec3 tangentX, tangentY;
+    // calculate tangentX and tangentY
+    glm::vec3 v(0.f, 1.f, 0.f);
+    if (glm::abs(glm::dot(v, N)) > 0.999f)
+    {
+        v = glm::vec3(1.f, 0.f, 0.f);
+    }
+    tangentX = glm::normalize(glm::cross(v, N));
+    tangentY = glm::normalize(glm::cross(N, tangentX));
+    outPDF = pdf;
+    outBSDF = BRDF(params, L, V, N, tangentX, tangentY);
 }
 
-__device__ void bsdfDiffuseSample(glm::vec3& outBSDF, float& outPDF, Ray& out_wi, glm::vec3 p,
-    glm::vec3 surfaceNormal, Material* material,
+__device__ void bsdfPBRSample(glm::vec3& outBSDF, float& outPDF, Ray& out_wi, glm::vec3 ViewDir, glm::vec3 p,
+    glm::vec3 surfaceNormal, const Material& material,
     thrust::default_random_engine& rng)
 {
     // set segment.ray.origin
     out_wi.origin = p;
     // set segment.ray.direction on random position
     out_wi.direction = calculateRandomDirectionInHemisphere(surfaceNormal, rng);
-    bsdfDiffuse(outBSDF, outPDF, out_wi, surfaceNormal, material);
-}
-
-__device__ void bsdfSpecular(PathSegment* wi, PathSegment* wo, Material* material)
-{
-
+	bsdfPBR(outBSDF, outPDF, material, out_wi.direction, ViewDir, surfaceNormal);
 }
 
 __device__ void bsdfEmitting(PathSegment* wo, Material* material)
@@ -273,7 +312,7 @@ __device__ bool sampleLightFromIntersections(
 }
 
 __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContribution, 
-    glm::vec3 In_p, glm::vec3 InSurfaceNormal, Material& InSurfaceMat, 
+    glm::vec3 In_p, glm::vec3 InViewDir, glm::vec3 InSurfaceNormal, Material& InSurfaceMat, 
     Geom& InLightGeom, Material& InLightMat, int GeomSize, Geom* Geoms, StaticMeshData_Device* mesh,
     thrust::default_random_engine& rng)
 {
@@ -285,7 +324,8 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
     bool sampledDirectLight = sampleLightFromIntersections(debug, directLight, pdf_Ld, wj, In_p, InLightMat, InLightGeom, GeomSize, Geoms, mesh, rng);
     if (sampledDirectLight)
     {
-        bsdfDiffuse(bsdf, pdf_bsdf, wj, InSurfaceNormal, &InSurfaceMat);
+        //bsdfDiffuse(bsdf, pdf_bsdf, wj, InSurfaceNormal, &InSurfaceMat);
+        bsdfPBR(bsdf, pdf_bsdf, InSurfaceMat, wj.direction, InViewDir, InSurfaceNormal);
         float weight = power_heuristic(pdf_Ld, pdf_bsdf);
         OutContribution += directLight * bsdf * glm::max(0.f, glm::dot(wj.direction, InSurfaceNormal)) * weight / pdf_Ld;
     }
@@ -294,7 +334,8 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
 	    OutContribution = glm::vec3(0.f);
 		return;
     }
-    bsdfDiffuseSample(bsdf, pdf_bsdf, wj, In_p, InSurfaceNormal, &InSurfaceMat, rng);
+    bsdfPBRSample(bsdf, pdf_bsdf, wj, InViewDir, In_p, InSurfaceNormal, InSurfaceMat, rng);
+    //bsdfDiffuseSample(bsdf, pdf_bsdf, wj, In_p, InSurfaceNormal, &InSurfaceMat, rng);
     int hit_index = -1;
     glm::vec3 intersect, normal;
     getIntersectionGeometryIndex(debug,hit_index, intersect, normal, wj, GeomSize, Geoms, mesh);
@@ -309,7 +350,7 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
 }
 
 
-__global__ void generateRayFromIntersections(int iter, int numPaths,
+__global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
     PathSegment* pathSegments, ShadeableIntersection* dev_intersections,
     Material* inMaterial, int geomSize, Geom* geoms, Geom* light_geoms, int* dev_pathAlive, StaticMeshData_Device* mesh)
 {
@@ -334,7 +375,7 @@ __global__ void generateRayFromIntersections(int iter, int numPaths,
     }
     Material material = inMaterial[intersection.materialId];
 	glm::vec3 p = intersection.intersectPoint + EPSILON * intersection.surfaceNormal;
-    thrust::default_random_engine rng = makeSeededRandomEngine(iter, pathIndex, path_segment.remainingBounces);
+    thrust::default_random_engine rng = makeSeededRandomEngine(frame, pathIndex, iter * path_segment.remainingBounces);
     if (material.emittance > 0.)
     {
 		path_segment.Contribution += path_segment.BSDF * material.emittance / path_segment.PDF * path_segment.Cosine;
@@ -344,13 +385,15 @@ __global__ void generateRayFromIntersections(int iter, int numPaths,
     }
     glm::vec3 contrib;
     glm::vec3 debug;
-    SampleDirectLightMIS(debug, contrib, p, intersection.surfaceNormal, material,
+	glm::vec3 ViewDir = -path_segment.ray.direction;
+    SampleDirectLightMIS(debug, contrib, p, ViewDir, intersection.surfaceNormal, material,
         light_geom, light_mat, geomSize, geoms, mesh, rng);
 	path_segment.Contribution += path_segment.BSDF * contrib / path_segment.PDF * path_segment.Cosine;
     Ray wi;
     glm::vec3 bsdf_at_p;
 	float pdf_bsdf;
-    bsdfDiffuseSample(bsdf_at_p, pdf_bsdf, wi, p, intersection.surfaceNormal, &material, rng);
+    //bsdfDiffuseSample(bsdf_at_p, pdf_bsdf, wi, p, intersection.surfaceNormal, &material, rng);
+	bsdfPBRSample(bsdf_at_p, pdf_bsdf, wi, ViewDir, p, intersection.surfaceNormal, material, rng);
 	path_segment.BSDF *= bsdf_at_p;
     path_segment.PDF *= pdf_bsdf;
 	path_segment.Cosine *= glm::max(0.f, glm::dot(wi.direction, intersection.surfaceNormal));
