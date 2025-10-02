@@ -82,6 +82,31 @@ __device__ void samplePlane(Geom& InGeom, glm::vec3& OutWorldPosition, glm::vec3
     OutWorldNormal = glm::normalize(glm::vec3(worldNormal));
     OutPdf = 1.0f / faceArea;
 }
+__device__ void sampleMesh(Geom& InGeom, glm::vec3& OutWorldPosition, glm::vec3& OutWorldNormal, float& OutPdf,
+    thrust::default_random_engine& rng)
+{
+    // create random float between -0.5 and 0.5
+    StaticMesh::RenderProxy* MeshProxy = InGeom.MeshProxy_Device;
+    thrust::uniform_int_distribution<int> uInt(0, MeshProxy->VertexCount / 3);
+    thrust::uniform_real_distribution<float> uFloat(0.f, 1.f);
+    float randomU = uFloat(rng);
+    float randomV = uFloat(rng);
+    if (randomU + randomV > 1.0f)
+    {
+        randomU = 1.f - randomU;
+        randomV = 1.f - randomV;
+    }
+    float randomW = 1.f - randomU - randomV;
+    int randomIndex = uInt(rng);
+    glm::vec3 p0 = glm::vec3(InGeom.transform * glm::vec4(MeshProxy->raw.VertexPosition_Device[randomIndex * 3 + 0], 1.f));
+    glm::vec3 p1 = glm::vec3(InGeom.transform * glm::vec4(MeshProxy->raw.VertexPosition_Device[randomIndex * 3 + 1], 1.f));
+    glm::vec3 p2 = glm::vec3(InGeom.transform * glm::vec4(MeshProxy->raw.VertexPosition_Device[randomIndex * 3 + 2], 1.f));
+    OutWorldNormal = glm::normalize(glm::cross(p1 - p0, p2 - p0));
+    float faceArea = glm::length(glm::cross(p1 - p0, p2 - p0)) * 0.5f;
+    OutWorldPosition = randomU * p0 + randomV * p1 + randomW * p2;
+    OutPdf = 1.0f / faceArea / (MeshProxy->VertexCount / 3);
+}
+
 
 __device__ void sampleGeometry(
     Geom& InGeom, glm::vec3& OutWorldPosition, glm::vec3& OutWorldNormal, float& OutPdf,
@@ -95,6 +120,10 @@ __device__ void sampleGeometry(
     else if (InGeom.type == PLANE)
     {
         samplePlane(InGeom, OutWorldPosition, OutWorldNormal, OutPdf, rng);
+    }
+    else if (InGeom.type == MESH)
+    {
+        sampleMesh(InGeom, OutWorldPosition, OutWorldNormal, OutPdf, rng);
     }
 }
 
@@ -278,6 +307,8 @@ __host__ __device__ float planeIntersectionTest(
     }
     OutIntersect.intersectPoint = multiplyMV(plane.transform, glm::vec4(planeIntersect, 1.0f));
     OutIntersect.surfaceNormal = glm::normalize(multiplyMV(plane.invTranspose, glm::vec4(glm::vec3(0.f, 1.f, 0.f), 0.0f)));
+    OutIntersect.uv.x = planeIntersect.x + 0.5f;
+    OutIntersect.uv.y = planeIntersect.y + 0.5f;
     if (q.direction.y>0.f)
     {
         OutIntersect.surfaceNormal = -OutIntersect.surfaceNormal;

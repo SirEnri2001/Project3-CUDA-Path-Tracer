@@ -56,9 +56,11 @@ void LoadObjImpl(StaticMesh& Mesh, std::string FilePath)
                 Mesh.Data.boxMin = glm::min(Mesh.Data.boxMin, glm::vec3(vx, vy, vz));
                 Mesh.Data.boxMax = glm::max(Mesh.Data.boxMax, glm::vec3(vx, vy, vz));
 
+                Mesh.AttribFlags |= StaticMeshAttrib::POSITION;
                 Mesh.Data.VertexPosition_Host[3 * f + v] = glm::vec3(vx, vy, vz);
                 // Check if `normal_index` is zero or positive. negative = no normal data
                 if (idx.normal_index >= 0) {
+                    Mesh.AttribFlags |= StaticMeshAttrib::NORMAL;
                     tinyobj::real_t nx = attrib.normals[3 * size_t(idx.normal_index) + 0];
                     tinyobj::real_t ny = attrib.normals[3 * size_t(idx.normal_index) + 1];
                     tinyobj::real_t nz = attrib.normals[3 * size_t(idx.normal_index) + 2];
@@ -67,6 +69,7 @@ void LoadObjImpl(StaticMesh& Mesh, std::string FilePath)
 
                 // Check if `texcoord_index` is zero or positive. negative = no texcoord data
                 if (idx.texcoord_index >= 0) {
+                    Mesh.AttribFlags |= StaticMeshAttrib::TEXCOORD;
                     tinyobj::real_t tx = attrib.texcoords[2 * size_t(idx.texcoord_index) + 0];
                     tinyobj::real_t ty = attrib.texcoords[2 * size_t(idx.texcoord_index) + 1];
                     Mesh.Data.VertexTexCoord_Host[3 * f + v] = glm::vec2(tx, ty);

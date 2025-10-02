@@ -144,7 +144,7 @@ __global__ void computeIntersections(
         int matId = scene->geoms_Device[hit_geom_index].materialid;
         device_materialIds[path_index] = matId;
         Intersect.materialId = matId;
-        pathSegment.debug = glm::vec3(Intersect.uv.x, Intersect.uv.y, 0.f);
+        pathSegment.debug = Intersect.surfaceNormal;
 		pathSegments[path_index] = pathSegment;
     }
 	intersections[path_index] = Intersect;
@@ -264,18 +264,18 @@ __device__ bool sampleLightFromIntersections(
     outPdf /= dotProduct;
     outPdf *= (distance * distance);
 	int hit_geom_index = -1;
-    ShadeableIntersection _;
+    ShadeableIntersection Intersect;
 	getIntersectionGeometryIndex(debug, 
 		hit_geom_index,
-        _,
+        Intersect,
         wj, geomSize, geoms);
     outDirectLight += light_mat.emittance;
-    return dotProduct > 0.0001f && hit_geom_index == 0;//&& glm::length(tmp_intersect - lightPosition) < 0.001f;
+    return dotProduct > 0.0001f && glm::length(Intersect.intersectPoint - lightPosition) < 0.001f;
 }
 
 __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContribution, 
     glm::vec3 In_p, glm::vec3 InViewDir, glm::vec3 InSurfaceNormal, Material& InSurfaceMat, 
-    Geom& InLightGeom, Material& InLightMat, int GeomSize, Geom* Geoms, 
+    Scene::RenderProxy* Scene, int GeomSize, Geom* Geoms, 
     thrust::default_random_engine& rng)
 {
     glm::vec3 directLight;
@@ -284,7 +284,13 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
     glm::vec2 uv;
     float pdf_bsdf;
     Ray wj;
-    bool sampledDirectLight = sampleLightFromIntersections(debug, directLight, pdf_Ld, wj, In_p, InLightMat, InLightGeom, GeomSize, Geoms, rng);
+    thrust::uniform_int_distribution<int> uInt(0, Scene->lights_size);
+    int LightIndex = uInt(rng);
+    int LightGeomIndex = Scene->light_index_Device[LightIndex];
+    Geom& LightGeom = Scene->geoms_Device[LightGeomIndex];
+    Material& LightMat = Scene->materials_Device[LightGeom.materialid];
+    bool sampledDirectLight = sampleLightFromIntersections(debug, directLight, pdf_Ld, wj, In_p, LightMat, LightGeom, GeomSize, Geoms, rng);
+    pdf_Ld /= Scene->lights_size;
     if (sampledDirectLight)
     {
         //bsdfDiffuse(bsdf, pdf_bsdf, wj, InSurfaceNormal, &InSurfaceMat);
@@ -300,14 +306,17 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
     bsdfPBRSample(debug, bsdf, pdf_bsdf, wj, InViewDir, In_p, InSurfaceNormal, uv, InSurfaceMat, rng);
     //bsdfDiffuseSample(bsdf, pdf_bsdf, wj, In_p, InSurfaceNormal, &InSurfaceMat, rng);
     int hit_index = -1;
-    ShadeableIntersection _;
-    getIntersectionGeometryIndex(debug,hit_index, _, wj, GeomSize, Geoms);
-    if (hit_index != 0)
+    ShadeableIntersection Intersect;
+    getIntersectionGeometryIndex(debug,hit_index, Intersect, wj, GeomSize, Geoms);
+    if (hit_index != LightGeomIndex)
     {
        OutContribution = glm::vec3(0.f);
        return;
     }
-    getGeomPDF(pdf_Ld, InLightGeom);
+    getGeomPDF(pdf_Ld, LightGeom);
+    pdf_Ld /= glm::dot(-wj.direction, Intersect.surfaceNormal);
+    float r = glm::length(Intersect.intersectPoint - wj.origin);
+    pdf_Ld /= r * r;
     float weight = power_heuristic(pdf_bsdf, pdf_Ld);
     OutContribution += directLight * bsdf * glm::max(0.f, glm::dot(wj.direction, InSurfaceNormal)) * weight / pdf_bsdf;    
 }
@@ -351,7 +360,7 @@ __global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
     glm::vec3 debug;
 	glm::vec3 ViewDir = -path_segment.ray.direction;
     SampleDirectLightMIS(debug, contrib, p, ViewDir, intersection.surfaceNormal, material,
-        light_geom, light_mat, scene->geoms_size, scene->geoms_Device, rng);
+        scene, scene->geoms_size, scene->geoms_Device, rng);
 	path_segment.Contribution += path_segment.BSDF * contrib / path_segment.PDF * path_segment.Cosine;
     Ray wi;
     glm::vec3 bsdf_at_p;

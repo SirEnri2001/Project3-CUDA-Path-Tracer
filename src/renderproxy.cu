@@ -104,26 +104,26 @@ __host__ void CalculateSpeedUpOctreeForStaticMesh(StaticMesh* Mesh)
         Mesh->Proxy_Host->raw.GridIndicesStart_Device,
         Mesh->Proxy_Host->raw.GridIndicesEnd_Device);
     checkCUDAError("calculateGridStartEndIndices");
-    //int* indices = new int[GRID_SIZE];
-    //cudaMemcpy(indices, Mesh->Proxy_Host->raw.GridIndicesStart_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
-    //for (int i = 0; i < GRID_SIZE; i++)
-    //{
-    //    std::cout << indices[i] << ", ";
-    //    if (i % 20 == 0)
-    //    {
-    //        std::cout << std::endl;
-    //    }
-    //}
-    //std::cout << "============" << std::endl;
-    //cudaMemcpy(indices, Mesh->Proxy_Host->raw.GridIndicesEnd_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
-    //for (int i = 0; i < GRID_SIZE; i++)
-    //{
-    //    std::cout << indices[i] << ", ";
-    //    if (i % 20 == 0)
-    //    {
-    //        std::cout << std::endl;
-    //    }
-    //}
+    int* indices = new int[GRID_SIZE];
+    cudaMemcpy(indices, Mesh->Proxy_Host->raw.GridIndicesStart_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
+    for (int i = 0; i < GRID_SIZE; i++)
+    {
+        std::cout << indices[i] << ", ";
+        if (i % 20 == 0)
+        {
+            std::cout << std::endl;
+        }
+    }
+    std::cout << "============" << std::endl;
+    cudaMemcpy(indices, Mesh->Proxy_Host->raw.GridIndicesEnd_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
+    for (int i = 0; i < GRID_SIZE; i++)
+    {
+        std::cout << indices[i] << ", ";
+        if (i % 20 == 0)
+        {
+            std::cout << std::endl;
+        }
+    }
 }
 
 void StaticMeshManager::CalculateOctreeStructureCUDA()

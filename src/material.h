@@ -19,14 +19,11 @@ struct Texture
 };
 struct Material
 {
-    glm::vec3 color;
+    glm::vec3 color = glm::vec3(1.f,0.f,1.f);
 	Texture* BaseColorTexture = nullptr;
 	Texture::RenderProxy* BaseColorTextureProxy_Device = nullptr;
-    float roughness;
-    float hasReflective;
-    float hasRefractive;
-    float indexOfRefraction;
-    float emittance;
+    float roughness = 0.f;
+    float emittance = 0.f;
     bool isLight = false;
 };
 
