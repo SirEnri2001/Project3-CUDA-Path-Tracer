@@ -198,6 +198,7 @@ void initPBO()
 void errorCallback(int error, const char* description)
 {
     fprintf(stderr, "%s\n", description);
+    __debugbreak();
 }
 
 bool init()

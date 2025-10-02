@@ -15,6 +15,14 @@ namespace tinygltf
 	struct Mesh;
 }
 
+enum StaticMeshAttrib
+{
+	POSITION = 1 << 0,
+	NORMAL = 1 << 1,
+	TEXCOORD = 1 << 2,
+	COLOR = 1 << 3
+};
+
 class StaticMesh
 {
 public:
@@ -23,6 +31,7 @@ public:
 		unsigned int VertexCount;
 		glm::vec3 boxMin;
 		glm::vec3 boxMax;
+		unsigned int AttribFlags;
 		struct RawPtr
 		{
 			glm::vec3* VertexPosition_Device = nullptr;
@@ -47,6 +56,8 @@ public:
 		std::vector<glm::vec2> VertexTexCoord_Host;
 	} Data;
 
+	unsigned int AttribFlags = 0;
+	int MaterialId;
 	RenderProxy* Proxy_Host = nullptr; // Host readable address
 	RenderProxy* Proxy_Device = nullptr; // Device readable address
 

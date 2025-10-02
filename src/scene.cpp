@@ -25,6 +25,35 @@ using json = nlohmann::json;
 
 Scene::Scene()
 {
+    Camera& camera = state.camera;
+    RenderState& state = this->state;
+    camera.resolution.x = 800;
+    camera.resolution.y = 800;
+    float fovy = 45.f;
+    state.iterations = 5000;
+    state.traceDepth = 8;
+    state.imageName = "PT_Result";
+
+    camera.position = glm::vec3(0.f, 5.0f, 10.5f);
+    camera.lookAt = glm::vec3(0.f, 5.0f, 0.f);
+    camera.up = glm::vec3(0.f, 1.0f, 0.f);
+
+    //calculate fov based on resolution
+    float yscaled = tan(fovy * (PI / 180));
+    float xscaled = (yscaled * camera.resolution.x) / camera.resolution.y;
+    float fovx = (atan(xscaled) * 180) / PI;
+    camera.fov = glm::vec2(fovx, fovy);
+
+    camera.right = glm::normalize(glm::cross(camera.view, camera.up));
+    camera.pixelLength = glm::vec2(2 * xscaled / (float)camera.resolution.x,
+        2 * yscaled / (float)camera.resolution.y);
+
+    camera.view = glm::normalize(camera.lookAt - camera.position);
+
+    //set up render camera stuff
+    int arraylen = camera.resolution.x * camera.resolution.y;
+    state.image.resize(arraylen);
+    std::fill(state.image.begin(), state.image.end(), glm::vec3());
 }
 
 void Scene::DestroySceneRenderProxy()
@@ -172,6 +201,75 @@ void Scene::ReadJSON(const std::string& jsonName)
     }
 }
 
+void LoadGeomFromModelNodes(
+    std::vector<Geom>& geoms, 
+    const std::vector<tinygltf::Node>& nodes,
+    const std::vector<tinygltf::Mesh>& meshes
+)
+{
+	struct SceneNode
+    {
+        glm::mat4 LocalTransfrom;
+		glm::mat4 GlobalTransform;
+        SceneNode* parent = nullptr;
+        std::string MeshName;
+	};
+
+    std::vector<SceneNode> sceneNodes;
+    sceneNodes.resize(nodes.size());
+    for (int i = 0; i < nodes.size();i++)
+    {
+        const tinygltf::Node& n = nodes[i];
+		SceneNode& sn = sceneNodes[i];
+        if (n.mesh!=-1)
+        {
+			sn.MeshName = meshes[n.mesh].name;
+        }
+		sn.LocalTransfrom = glm::mat4(1.0f);
+        if (n.matrix.size()==16)
+        {
+            for (int d = 0; d < 16; d++)
+            {
+                sn.LocalTransfrom[d / 4][d % 4] = n.matrix[d];
+            }
+        }
+		
+        for (auto& child : n.children)
+        {
+			sceneNodes[child].parent = &sn;
+        }
+    }
+
+    for (int i = 0; i < sceneNodes.size(); i++)
+	{
+		// Calculate GlobalTransform
+		SceneNode* current = &sceneNodes[i];
+        SceneNode* sn = current;
+        current->GlobalTransform = glm::mat4(1.0f);
+		while (current)
+		{
+			sn->GlobalTransform = current->LocalTransfrom * sn->GlobalTransform;
+			current = current->parent;
+		}
+    }
+
+    for (int i = 0; i < sceneNodes.size(); i++)
+    {
+        SceneNode& sn = sceneNodes[i];
+        if (sn.MeshName.size() > 0)
+        {
+            Geom geom;
+            geom.type = GeomType::MESH;
+            geom.transform = sn.GlobalTransform;
+            geom.inverseTransform = glm::inverse(geom.transform);
+            geom.invTranspose = glm::transpose(geom.inverseTransform);
+            geom.Mesh_Host = StaticMeshManager::Get()->GetMesh(sn.MeshName);
+            geom.materialid = geom.Mesh_Host->MaterialId;
+            geoms.push_back(geom);
+        }
+    }
+}
+
 void Scene::ReadGLTF(std::string filename)
 {
     tinygltf::Model model;
@@ -240,30 +338,11 @@ void Scene::ReadGLTF(std::string filename)
         const tinygltf::Mesh& gltfMesh = model.meshes[i];
         StaticMeshManager::Get()->LoadGLTF(gltfMesh.name, gltfMesh, model);
     }
-
-    for (size_t i = 0; i < scene.nodes.size(); ++i) {
-        const tinygltf::Node& node = model.nodes[scene.nodes[i]];
-
-        glm::mat4 mat = glm::mat4(1.0f);
-        for (int d = 0; d < 16; d++)
-        {
-            mat[d / 4][d % 4] = node.matrix[d];
-        }
-        Geom geom;
-        geom.type = GeomType::MESH;
-        geom.transform = mat;
-        geom.inverseTransform = glm::inverse(mat);
-        geom.invTranspose = glm::transpose(geom.inverseTransform);
-        if (node.mesh >= 0) {
-			geom.materialid = model.meshes[node.mesh].primitives[0].material;
-			geom.Mesh_Host = StaticMeshManager::Get()->GetMesh(model.meshes[node.mesh].name);
-        }
-		geoms.push_back(geom);
-    }
+    LoadGeomFromModelNodes(geoms, model.nodes, model.meshes);
     int index = 0;
     for (auto& g : geoms)
     {
-        if (materials[g.materialid].isLight)
+        if (g.materialid >=0 && materials[g.materialid].isLight)
         {
             lights.push_back(index);
         }

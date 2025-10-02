@@ -98,7 +98,6 @@ __host__ void CalculateSpeedUpOctreeForStaticMesh(StaticMesh* Mesh)
         Mesh->Proxy_Host->raw.TriangleToGridIndices_Device,
         Mesh->Proxy_Host->raw.TriangleToGridIndices_Device + Mesh->Data.VertexCount / 3,
         thrust::make_zip_iterator(tuple));
-    checkCUDAError("sort_by_key");
     calculateGridStartEndIndices << <Grid, BlockSize >> > (
         Mesh->Data.VertexCount / 3,
         Mesh->Proxy_Host->raw.TriangleToGridIndices_Device,

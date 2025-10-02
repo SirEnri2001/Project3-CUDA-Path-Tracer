@@ -333,11 +333,11 @@ __host__ __device__ float triangleIntersectionTest(
 }
 
 __host__ __device__ float meshIntersectionTest(
-    Geom mesh, StaticMesh::RenderProxy* dev_staticMesh,
+    Geom mesh, StaticMesh::RenderProxy* MeshProxy,
     Ray ray_World,
     ShadeableIntersection& OutIntersect)
 {
-	int totalObjectCount = dev_staticMesh->VertexCount / 3;
+	int totalObjectCount = MeshProxy->VertexCount / 3;
     Ray ray_Local;
     ray_Local.origin = multiplyMV(mesh.inverseTransform, glm::vec4(ray_World.origin, 1.0f));
     ray_Local.direction = glm::normalize(multiplyMV(mesh.inverseTransform, glm::vec4(ray_World.direction, 0.0f)));
@@ -355,23 +355,23 @@ __host__ __device__ float meshIntersectionTest(
     {
 	    // test each triangle in the mesh
         t = triangleIntersectionTest(
-            dev_staticMesh->raw.VertexPosition_Device[3 * i + 0],
-            dev_staticMesh->raw.VertexPosition_Device[3 * i + 1],
-            dev_staticMesh->raw.VertexPosition_Device[3 * i + 2],
+            MeshProxy->raw.VertexPosition_Device[3 * i + 0],
+            MeshProxy->raw.VertexPosition_Device[3 * i + 1],
+            MeshProxy->raw.VertexPosition_Device[3 * i + 2],
             ray_Local,
             Pos_Temp,
             Nor_Temp,
             bary,
             front
         );
-        if (t>0.f && t < t_min)
+        if (MeshProxy->raw.VertexTexCoord_Device !=nullptr && t>0.f && t < t_min)
         {
 	        t_min = glm::min(t, t_min);
             IntersectPos_Local = Pos_Temp;
             IntersectNor_Local = Nor_Temp;
-			uv1 = dev_staticMesh->raw.VertexTexCoord_Device[3 * i + 0];
-            uv2 = dev_staticMesh->raw.VertexTexCoord_Device[3 * i + 1];
-			uv3 = dev_staticMesh->raw.VertexTexCoord_Device[3 * i + 2];
+			uv1 = MeshProxy->raw.VertexTexCoord_Device[3 * i + 0];
+            uv2 = MeshProxy->raw.VertexTexCoord_Device[3 * i + 1];
+			uv3 = MeshProxy->raw.VertexTexCoord_Device[3 * i + 2];
         }
     }
     if (t_min==FLT_MAX)
@@ -424,7 +424,7 @@ __device__ float IntersectBoundingBoxLayer(
     Ray InRayWorld, 
     ShadeableIntersection& OutIntersect,
     int layer, 
-    StaticMesh::RenderProxy* dev_staticMeshes)
+    StaticMesh::RenderProxy* MeshProxy)
 {
     Ray ray_Local;
     ray_Local.origin = multiplyMV(MeshGeom.inverseTransform, glm::vec4(InRayWorld.origin, 1.0f));
@@ -434,9 +434,9 @@ __device__ float IntersectBoundingBoxLayer(
 
 	// step 1: transform ray according to boxMin and boxMax
     Ray BoundSpaceRay = ray_Local;
-    BoundSpaceRay.origin -= dev_staticMeshes->boxMin;
-    BoundSpaceRay.origin /= (dev_staticMeshes->boxMax - dev_staticMeshes->boxMin);
-    BoundSpaceRay.direction /= (dev_staticMeshes->boxMax - dev_staticMeshes->boxMin);
+    BoundSpaceRay.origin -= MeshProxy->boxMin;
+    BoundSpaceRay.origin /= (MeshProxy->boxMax - MeshProxy->boxMin);
+    BoundSpaceRay.direction /= (MeshProxy->boxMax - MeshProxy->boxMin);
     BoundSpaceRay.direction = glm::normalize(BoundSpaceRay.direction);
     int GridDim = 1 << layer; // 2^layer
 	float InvGridDim = 1.f / GridDim;
@@ -481,8 +481,8 @@ __device__ float IntersectBoundingBoxLayer(
 
         // step 3: check current bounding if intersect with any triangle
         int boundIndex = GetPointBoundIndex(BoundSpaceRay.origin, layer);
-        int startTriangleIndex = dev_staticMeshes->raw.GridIndicesStart_Device[boundIndex + 1];
-        int endTriangleIndex = dev_staticMeshes->raw.GridIndicesEnd_Device[boundIndex + 1];
+        int startTriangleIndex = MeshProxy->raw.GridIndicesStart_Device[boundIndex + 1];
+        int endTriangleIndex = MeshProxy->raw.GridIndicesEnd_Device[boundIndex + 1];
 		int triangleCount = endTriangleIndex - startTriangleIndex;
         if (triangleCount > 0 && startTriangleIndex!=-1)
         {
@@ -497,23 +497,23 @@ __device__ float IntersectBoundingBoxLayer(
             float t;
             for (int i = 0; i < triangleCount; i++)
             {
-                int triangleId = dev_staticMeshes->raw.TriangleIndices_Device[startTriangleIndex + i];
+                int triangleId = MeshProxy->raw.TriangleIndices_Device[startTriangleIndex + i];
                 // test each triangle in the mesh
                 t = triangleIntersectionTest(
-                    dev_staticMeshes->raw.VertexPosition_Device[3 * triangleId + 0],
-                    dev_staticMeshes->raw.VertexPosition_Device[3 * triangleId + 1],
-                    dev_staticMeshes->raw.VertexPosition_Device[3 * triangleId + 2],
+                    MeshProxy->raw.VertexPosition_Device[3 * triangleId + 0],
+                    MeshProxy->raw.VertexPosition_Device[3 * triangleId + 1],
+                    MeshProxy->raw.VertexPosition_Device[3 * triangleId + 2],
                     ray_Local,
                     tempPos,
                     tempNor,
                     Bary_Temp,
                     front
                 );
-                if (t > 0.f && t < t_min)
+                if (MeshProxy->raw.VertexTexCoord_Device!=nullptr && t > 0.f && t < t_min)
                 {
-					uv1 = dev_staticMeshes->raw.VertexTexCoord_Device[3 * triangleId + 0];
-                    uv2 = dev_staticMeshes->raw.VertexTexCoord_Device[3 * triangleId + 1];
-                    uv3 = dev_staticMeshes->raw.VertexTexCoord_Device[3 * triangleId + 2];
+					uv1 = MeshProxy->raw.VertexTexCoord_Device[3 * triangleId + 0];
+                    uv2 = MeshProxy->raw.VertexTexCoord_Device[3 * triangleId + 1];
+                    uv3 = MeshProxy->raw.VertexTexCoord_Device[3 * triangleId + 2];
                     IntersectUV = uv1 * Bary_Temp.x + uv2 * Bary_Temp.y + uv3 * Bary_Temp.z;
                     t_min = glm::min(t, t_min);
                     IntersectPos_Local = tempPos;

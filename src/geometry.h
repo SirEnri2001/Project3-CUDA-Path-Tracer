@@ -69,7 +69,7 @@ __host__ __device__ float planeIntersectionTest(
     ShadeableIntersection& OutIntersect);
 __device__ void pdfPlane(float& OutPdf, Geom& InGeom);
 __host__ __device__ float meshIntersectionTest(
-    Geom plane, StaticMesh::RenderProxy* dev_staticMesh,
+    Geom plane, StaticMesh::RenderProxy* MeshProxy,
     Ray ray_World,
     ShadeableIntersection& OutIntersect);
 __device__ int GetPointBoundNextLayer(glm::vec3 p);
