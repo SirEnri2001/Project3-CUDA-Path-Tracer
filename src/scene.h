@@ -7,15 +7,18 @@ struct Material;
 
 class Scene
 {
-private:
+    glm::vec3 boxMin;
+    glm::vec3 boxMax;
 public:
     Scene();
     ~Scene();
     void ReadJSON(const std::string& jsonName);
     void ReadGLTF(std::string filename);
+    void PostLoad();
     void CreateRenderProxyForAll();
     void DestroySceneRenderProxy();
     void CenterCamera();
+    void CreateDefaultLight();
     std::vector<Geom> geoms;
     std::vector<int> lights;
     std::vector<Material> materials;

@@ -62,23 +62,7 @@ void Scene::CenterCamera()
 	{
         return;
 	}
-    glm::vec3 boxMin(FLT_MAX);
-    glm::vec3 boxMax(-FLT_MAX);
-    for (const auto& g : geoms)
-    {
-        if (g.type == MESH && g.Mesh_Host)
-        {
-            boxMin = glm::min(boxMin, glm::vec3(g.transform * glm::vec4(g.Mesh_Host->Data.boxMin, 1.0f)));
-            boxMax = glm::max(boxMax, glm::vec3(g.transform * glm::vec4(g.Mesh_Host->Data.boxMax, 1.0f)));
-        }
-        else
-        {
-            //other primitive types
-            //assume they are unit size centered at origin before transform
-            boxMin = glm::min(boxMin, glm::vec3(-0.5f));
-            boxMax = glm::max(boxMax, glm::vec3(0.5f));
-        }
-    }
+    
     glm::vec3 center = (boxMin + boxMax) * 0.5f;
     Camera& camera = state.camera;
     camera.resetLookAt = center;
@@ -88,6 +72,26 @@ void Scene::CenterCamera()
 	camera.position = -camera.view * 3.0f * camera.radius + camera.lookAt; // 3.0 is default zoom factor
     camera.right = glm::normalize(glm::cross(camera.view, camera.up));
 	camera.up = glm::normalize(glm::cross(camera.right, camera.view));
+}
+
+void Scene::CreateDefaultLight()
+{
+    Geom LightGeom;
+    LightGeom.type = PLANE;
+    LightGeom.scale = glm::vec3(boxMax.x - boxMin.x, 1.f, boxMax.z - boxMin.z) * 2.f;
+    LightGeom.translation = (boxMax + boxMin) * 0.5f + 2.f * glm::vec3(0.f, boxMax.y - boxMin.y, 0.f);
+    LightGeom.transform = utilityCore::buildTransformationMatrix(LightGeom.translation, glm::vec3(0.f), LightGeom.scale);
+    LightGeom.inverseTransform = glm::inverse(LightGeom.transform);
+    LightGeom.invTranspose = glm::transpose(LightGeom.inverseTransform);
+    LightGeom.materialid = materials.size(); // last one
+
+    Material Mat;
+    Mat.color = glm::vec3(0.9f, 0.8f, 0.7f);
+    Mat.emittance = 10.f;
+    Mat.isLight = true;
+    materials.push_back(Mat);
+    geoms.push_back(LightGeom);
+    lights.push_back(geoms.size() - 1);
 }
 
 
@@ -225,15 +229,6 @@ void Scene::ReadJSON(const std::string& jsonName)
     int arraylen = camera.resolution.x * camera.resolution.y;
     state.image.resize(arraylen);
     std::fill(state.image.begin(), state.image.end(), glm::vec3());
-    int index = 0;
-    for (auto& g : geoms)
-    {
-	    if (materials[g.materialid].isLight)
-	    {
-            lights.push_back(index);
-	    }
-        index++;
-    }
 }
 
 void LoadGeomFromModelNodes(
@@ -396,23 +391,40 @@ void Scene::ReadGLTF(std::string filename)
         StaticMeshManager::Get()->LoadGLTF(gltfMesh.name, gltfMesh, model);
     }
     LoadGeomFromModelNodes(geoms, model.nodes, model.meshes);
+}
+
+void Scene::PostLoad()
+{
     int index = 0;
     for (auto& g : geoms)
     {
-        if (g.materialid >=0 && materials[g.materialid].isLight)
+        if (materials[g.materialid].isLight)
         {
             lights.push_back(index);
         }
         index++;
     }
+    for (const auto& g : geoms)
+    {
+        if (g.type == MESH && g.Mesh_Host)
+        {
+            boxMin = glm::min(boxMin, glm::vec3(g.transform * glm::vec4(g.Mesh_Host->Data.boxMin, 1.0f)));
+            boxMax = glm::max(boxMax, glm::vec3(g.transform * glm::vec4(g.Mesh_Host->Data.boxMax, 1.0f)));
+        }
+    }
 }
+
 
 void Scene::CreateRenderProxyForAll()
 {
 	StaticMeshManager::Get()->CreateRenderProxyForAll();
 	StaticMeshManager::Get()->CalculateOctreeStructureCUDA();
     TextureManager::Get()->LoadAllTexturesToDevice();
-
+    if (lights.size()==0)
+    {
+        std::cerr << "No lighting objects in the scene!" << std::endl;
+        exit(1);
+    }
 	// Link Material texture pointers to device proxies
     for (auto& Mat : materials)
     {

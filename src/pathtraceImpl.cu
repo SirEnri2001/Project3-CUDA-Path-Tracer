@@ -275,7 +275,7 @@ __device__ bool sampleLightFromIntersections(
 
 __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContribution, 
     glm::vec3 In_p, glm::vec3 InViewDir, glm::vec3 InSurfaceNormal, Material& InSurfaceMat, 
-    Scene::RenderProxy* Scene, int GeomSize, Geom* Geoms, 
+    int GeomSize, Geom* Geoms, int LightSize, Geom& LightGeom, Material& LightMat, int LightGeomIndex,
     thrust::default_random_engine& rng)
 {
     glm::vec3 directLight;
@@ -284,13 +284,8 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
     glm::vec2 uv;
     float pdf_bsdf;
     Ray wj;
-    thrust::uniform_int_distribution<int> uInt(0, Scene->lights_size);
-    int LightIndex = uInt(rng);
-    int LightGeomIndex = Scene->light_index_Device[LightIndex];
-    Geom& LightGeom = Scene->geoms_Device[LightGeomIndex];
-    Material& LightMat = Scene->materials_Device[LightGeom.materialid];
     bool sampledDirectLight = sampleLightFromIntersections(debug, directLight, pdf_Ld, wj, In_p, LightMat, LightGeom, GeomSize, Geoms, rng);
-    pdf_Ld /= Scene->lights_size;
+    pdf_Ld /= LightSize;
     if (sampledDirectLight)
     {
         //bsdfDiffuse(bsdf, pdf_bsdf, wj, InSurfaceNormal, &InSurfaceMat);
@@ -339,8 +334,6 @@ __global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
     }
     PathSegment path_segment = pathSegments[pathIndex];
     ShadeableIntersection intersection = dev_intersections[pathIndex];
-    Geom light_geom = scene->geoms_Device[scene->light_index_Device[0]];
-	Material light_mat = scene->materials_Device[light_geom.materialid];
     if (intersection.materialId < 0) {
         path_segment.remainingBounces = 0;
         pathSegments[pathIndex] = path_segment;
@@ -359,8 +352,15 @@ __global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
     glm::vec3 contrib;
     glm::vec3 debug;
 	glm::vec3 ViewDir = -path_segment.ray.direction;
+
+    thrust::uniform_int_distribution<int> uInt(0, scene->lights_size-1);
+    int LightIndex = uInt(rng);
+    int LightGeomIndex = scene->light_index_Device[LightIndex];
+    Geom LightGeom = scene->geoms_Device[LightGeomIndex];
+    Material LightMat = scene->materials_Device[LightGeom.materialid];
+
     SampleDirectLightMIS(debug, contrib, p, ViewDir, intersection.surfaceNormal, material,
-        scene, scene->geoms_size, scene->geoms_Device, rng);
+        scene->geoms_size, scene->geoms_Device, scene->lights_size, LightGeom, LightMat, LightGeomIndex, rng);
 	path_segment.Contribution += path_segment.BSDF * contrib / path_segment.PDF * path_segment.Cosine;
     Ray wi;
     glm::vec3 bsdf_at_p;

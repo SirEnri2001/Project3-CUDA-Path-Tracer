@@ -87,7 +87,7 @@ __device__ void sampleMesh(Geom& InGeom, glm::vec3& OutWorldPosition, glm::vec3&
 {
     // create random float between -0.5 and 0.5
     StaticMesh::RenderProxy* MeshProxy = InGeom.MeshProxy_Device;
-    thrust::uniform_int_distribution<int> uInt(0, MeshProxy->VertexCount / 3);
+    thrust::uniform_int_distribution<int> uInt(0, MeshProxy->VertexCount / 3 - 1);
     thrust::uniform_real_distribution<float> uFloat(0.f, 1.f);
     float randomU = uFloat(rng);
     float randomV = uFloat(rng);

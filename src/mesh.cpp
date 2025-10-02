@@ -286,22 +286,29 @@ void StaticMesh::CreateProxy()
     checkCUDAError("StaticMesh::CreateProxy Attributes");
 
     // Create memory for accelerate structure
-    cudaMalloc((void**)&Proxy_Host->raw.TriangleToGridIndices_Device, sizeof(int) * Data.VertexCount);
-    cudaMemset(Proxy_Host->raw.TriangleToGridIndices_Device, -1, sizeof(int) * Data.VertexCount / 3);
+    int useOptimized = 1;
+#if USE_OPTIMIZED_GRID
+    useOptimized = 2;
+#endif
+    cudaMalloc((void**)&Proxy_Host->raw.TriangleToGridIndices_Device, sizeof(int) * Data.VertexCount / 3 * useOptimized);
+    cudaMemset(Proxy_Host->raw.TriangleToGridIndices_Device, GRID_SIZE, sizeof(int) * Data.VertexCount / 3 * useOptimized);
 
-    cudaMalloc((void**)&Proxy_Host->raw.GridIndicesStart_Device, sizeof(int) * GRID_SIZE);
-    cudaMemset(Proxy_Host->raw.GridIndicesStart_Device, -1, sizeof(int) * GRID_SIZE);
+    cudaMalloc((void**)&Proxy_Host->raw.GridIndicesStart_Device, sizeof(int) * (GRID_SIZE+1));
+    cudaMemset(Proxy_Host->raw.GridIndicesStart_Device, -1, sizeof(int) * (GRID_SIZE+1));
 
-	cudaMalloc((void**)&Proxy_Host->raw.GridIndicesEnd_Device, sizeof(int) * GRID_SIZE);
-    cudaMemset(Proxy_Host->raw.GridIndicesEnd_Device, -1, sizeof(int) * GRID_SIZE);
+	cudaMalloc((void**)&Proxy_Host->raw.GridIndicesEnd_Device, sizeof(int) * (GRID_SIZE + 1));
+    cudaMemset(Proxy_Host->raw.GridIndicesEnd_Device, -1, sizeof(int) * (GRID_SIZE + 1));
 
-    cudaMalloc((void**)&Proxy_Host->raw.TriangleIndices_Device, sizeof(int) * Proxy_Host->VertexCount / 3);
-    std::vector<int> InitTriangleIndices(Proxy_Host->VertexCount / 3);
+    cudaMalloc((void**)&Proxy_Host->raw.TriangleIndices_Device, sizeof(int) * Proxy_Host->VertexCount / 3 * useOptimized);
+    std::vector<int> InitTriangleIndices(Proxy_Host->VertexCount / 3 * useOptimized);
     for (int i = 0; i < Proxy_Host->VertexCount / 3; i++)
     {
         InitTriangleIndices[i] = i;
+#if USE_OPTIMIZED_GRID
+        InitTriangleIndices[i + Proxy_Host->VertexCount / 3] = i;
+#endif
     }
-    cudaMemcpy(Proxy_Host->raw.TriangleIndices_Device, InitTriangleIndices.data(), sizeof(int) * Proxy_Host->VertexCount / 3, cudaMemcpyHostToDevice);
+    cudaMemcpy(Proxy_Host->raw.TriangleIndices_Device, InitTriangleIndices.data(), sizeof(int) * Proxy_Host->VertexCount / 3 * useOptimized, cudaMemcpyHostToDevice);
 
     cudaMalloc((void**)&Proxy_Device, sizeof(RenderProxy));
     cudaMemcpy(Proxy_Device, Proxy_Host, sizeof(RenderProxy), cudaMemcpyHostToDevice);

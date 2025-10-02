@@ -16,7 +16,8 @@ __device__ glm::vec3 GetColorDevice(const Texture::RenderProxy& InTexture, glm::
 	return InTexture.Image_Device[x + y * InTexture.Extent.x];
 }
 
-__device__ int GetTriangleBound(glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, int layer) // p1 p2 p3 within [0,1]
+#if USE_OPTIMIZED_GRID
+__device__ void GetTriangleBound(int& bound1, int& bound2, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, int layer, int optimizedLayer) // p1 p2 p3 within [0,1]
 {
     int bound = -1;
     while (layer < GRID_LAYERS - 1)
@@ -24,6 +25,48 @@ __device__ int GetTriangleBound(glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, int la
         int boundP1 = GetPointBoundNextLayer(p1);
         int boundP2 = GetPointBoundNextLayer(p2);
         int boundP3 = GetPointBoundNextLayer(p3);
+        if (boundP1 != boundP2 && boundP1 != boundP3 && boundP1 != boundP3)
+        {
+	        // this triangle cross three bounds
+            break;
+        }
+
+        if (boundP1 != boundP2 || boundP1 != boundP3)
+        {
+            if (layer>optimizedLayer)
+            {
+                break;
+            }
+            if (boundP1!=boundP2)
+            {
+	            bound1 = 8 * (bound + 1) + boundP1;
+                bound2 = 8 * (bound + 1) + boundP2;
+            }else
+            {
+                bound1 = 8 * (bound + 1) + boundP1;
+                bound2 = 8 * (bound + 1) + boundP3;
+            }
+            return;
+        }
+        bound = 8 * (bound + 1) + boundP1;
+        p1 = glm::fract(p1 * 2.f);
+        p2 = glm::fract(p2 * 2.f);
+        p3 = glm::fract(p3 * 2.f);
+        layer++;
+    }
+    bound1 = bound;
+    bound2 = GRID_SIZE-1;
+}
+#else
+__device__ void GetTriangleBound(int& bound1, int& bound2, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, int layer, int optimizedLayer) // p1 p2 p3 within [0,1]
+{
+    int bound = -1;
+    while (layer < GRID_LAYERS - 1)
+    {
+        int boundP1 = GetPointBoundNextLayer(p1);
+        int boundP2 = GetPointBoundNextLayer(p2);
+        int boundP3 = GetPointBoundNextLayer(p3);
+
         if (boundP1 != boundP2 || boundP1 != boundP3)
         {
             break;
@@ -34,12 +77,15 @@ __device__ int GetTriangleBound(glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, int la
         p3 = glm::fract(p3 * 2.f);
         layer++;
     }
-    return bound;
+    bound1 = bound;
+    bound2 = GRID_SIZE;
 }
+#endif
 
 __global__ void calculateMeshGridSpeedup(StaticMesh::RenderProxy* InMeshData)
 {
     int triangleId = (blockIdx.x * blockDim.x) + threadIdx.x;
+    int triangleCount = InMeshData->VertexCount / 3;
     if (triangleId >= InMeshData->VertexCount / 3)
     {
         return;
@@ -52,8 +98,15 @@ __global__ void calculateMeshGridSpeedup(StaticMesh::RenderProxy* InMeshData)
     p1 = (p1 - boxMin) / (boxMax - boxMin);
     p2 = (p2 - boxMin) / (boxMax - boxMin);
     p3 = (p3 - boxMin) / (boxMax - boxMin);
-    int bound = GetTriangleBound(p1, p2, p3, 0);
-    InMeshData->raw.TriangleToGridIndices_Device[triangleId] = bound;
+    int b1, b2;
+    GetTriangleBound(b1, b2, p1, p2, p3, 0, 1);
+
+#if USE_OPTIMIZED_GRID
+    InMeshData->raw.TriangleToGridIndices_Device[triangleId] = b1;
+    InMeshData->raw.TriangleToGridIndices_Device[triangleId + triangleCount] = b2;
+#else
+    InMeshData->raw.TriangleToGridIndices_Device[triangleId] = b1;
+#endif
 }
 
 __global__ void calculateGridStartEndIndices(int triangleSize, int* InSortedGridIndices, int* OutGridIndicesStart, int* OutGridIndicesEnd)
@@ -83,29 +136,10 @@ __global__ void calculateGridStartEndIndices(int triangleSize, int* InSortedGrid
     }
 }
 
-__host__ void CalculateSpeedUpOctreeForStaticMesh(StaticMesh* Mesh)
+__host__ void OutputDebug(StaticMesh::RenderProxy* Proxy_Host)
 {
-    dim3 Grid;
-    dim3 BlockSize;
-    BlockSize.x = 128;
-    Grid.x = (Mesh->Data.VertexCount / 3 + BlockSize.x - 1) / BlockSize.x;
-    calculateMeshGridSpeedup << <Grid, BlockSize >> > (Mesh->Proxy_Device);
-    checkCUDAError("calculateMeshGridSpeedup");
-
-    auto tuple = thrust::make_tuple(Mesh->Proxy_Host->raw.TriangleToGridIndices_Device, Mesh->Proxy_Host->raw.TriangleIndices_Device);
-    thrust::sort_by_key(
-        thrust::device,
-        Mesh->Proxy_Host->raw.TriangleToGridIndices_Device,
-        Mesh->Proxy_Host->raw.TriangleToGridIndices_Device + Mesh->Data.VertexCount / 3,
-        thrust::make_zip_iterator(tuple));
-    calculateGridStartEndIndices << <Grid, BlockSize >> > (
-        Mesh->Data.VertexCount / 3,
-        Mesh->Proxy_Host->raw.TriangleToGridIndices_Device,
-        Mesh->Proxy_Host->raw.GridIndicesStart_Device,
-        Mesh->Proxy_Host->raw.GridIndicesEnd_Device);
-    checkCUDAError("calculateGridStartEndIndices");
     int* indices = new int[GRID_SIZE];
-    cudaMemcpy(indices, Mesh->Proxy_Host->raw.GridIndicesStart_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(indices,Proxy_Host->raw.GridIndicesStart_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
     for (int i = 0; i < GRID_SIZE; i++)
     {
         std::cout << indices[i] << ", ";
@@ -115,7 +149,7 @@ __host__ void CalculateSpeedUpOctreeForStaticMesh(StaticMesh* Mesh)
         }
     }
     std::cout << "============" << std::endl;
-    cudaMemcpy(indices, Mesh->Proxy_Host->raw.GridIndicesEnd_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(indices, Proxy_Host->raw.GridIndicesEnd_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
     for (int i = 0; i < GRID_SIZE; i++)
     {
         std::cout << indices[i] << ", ";
@@ -124,6 +158,35 @@ __host__ void CalculateSpeedUpOctreeForStaticMesh(StaticMesh* Mesh)
             std::cout << std::endl;
         }
     }
+    delete[] indices;
+}
+
+__host__ void CalculateSpeedUpOctreeForStaticMesh(StaticMesh* Mesh)
+{
+    dim3 Grid;
+    dim3 BlockSize;
+    BlockSize.x = 128;
+    Grid.x = (Mesh->Data.VertexCount / 3 + BlockSize.x - 1) / BlockSize.x;
+    calculateMeshGridSpeedup << <Grid, BlockSize >> > (Mesh->Proxy_Device);
+    checkCUDAError("calculateMeshGridSpeedup");
+    int useOptimizedGrid = 1;
+#if USE_OPTIMIZED_GRID
+    useOptimizedGrid = 2;
+#endif
+    Grid.x = (Mesh->Data.VertexCount / 3 * useOptimizedGrid + BlockSize.x - 1) / BlockSize.x;
+    auto tuple = thrust::make_tuple(Mesh->Proxy_Host->raw.TriangleToGridIndices_Device, Mesh->Proxy_Host->raw.TriangleIndices_Device);
+    thrust::sort_by_key(
+        thrust::device,
+        Mesh->Proxy_Host->raw.TriangleToGridIndices_Device,
+        Mesh->Proxy_Host->raw.TriangleToGridIndices_Device + Mesh->Data.VertexCount / 3 * useOptimizedGrid,
+        thrust::make_zip_iterator(tuple));
+    calculateGridStartEndIndices << <Grid, BlockSize >> > (
+        Mesh->Data.VertexCount / 3 * useOptimizedGrid,
+        Mesh->Proxy_Host->raw.TriangleToGridIndices_Device,
+        Mesh->Proxy_Host->raw.GridIndicesStart_Device,
+        Mesh->Proxy_Host->raw.GridIndicesEnd_Device);
+    checkCUDAError("calculateGridStartEndIndices");
+    OutputDebug(Mesh->Proxy_Host);
 }
 
 void StaticMeshManager::CalculateOctreeStructureCUDA()

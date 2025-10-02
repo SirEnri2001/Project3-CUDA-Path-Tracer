@@ -5,9 +5,11 @@
 #include <vector>
 #include <glm/glm.hpp>
 
-#define GRID_SIZE 4681
-#define GRID_WIDTH 16
+#define GRID_SIZE 585
+#define GRID_WIDTH 8
 #define GRID_LAYERS 4
+
+#define USE_OPTIMIZED_GRID 1
 
 namespace tinygltf
 {

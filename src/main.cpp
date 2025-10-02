@@ -364,6 +364,8 @@ int main(int argc, char** argv)
         printf("Usage: %s SCENEFILE.json / SCENEFILE.gltf\n", argv[0]);
         return 1;
     }
+    scene->PostLoad();
+    scene->CreateDefaultLight();
     //Create Instance for ImGUIData
     guiData = new GuiDataContainer();
 
