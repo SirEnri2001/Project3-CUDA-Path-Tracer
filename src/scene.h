@@ -3,6 +3,8 @@
 #include "sceneStructs.h"
 #include <vector>
 
+struct Material;
+
 class Scene
 {
 private:
@@ -15,3 +17,4 @@ public:
     RenderState state;
     std::string mesh;
 };
+void ReadGLTF(Scene* InOutScene, std::string filename);

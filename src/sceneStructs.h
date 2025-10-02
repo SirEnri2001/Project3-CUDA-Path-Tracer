@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "mesh.h"
+
 #define BACKGROUND_COLOR (glm::vec3(0.0f))
 
 enum GeomType
@@ -33,16 +35,9 @@ struct Geom
     glm::mat4 transform;
     glm::mat4 inverseTransform;
     glm::mat4 invTranspose;
-};
 
-struct Material
-{
-    glm::vec3 color;
-    float roughness;
-    float hasReflective;
-    float hasRefractive;
-    float indexOfRefraction;
-    float emittance;
+	StaticMesh* Mesh_Host = nullptr;
+	StaticMesh::RenderProxy* MeshProxy_Device = nullptr;
 };
 
 struct Camera
@@ -85,5 +80,7 @@ struct ShadeableIntersection
 {
     glm::vec3 intersectPoint;
     glm::vec3 surfaceNormal;
+	glm::vec2 uv;
+    bool outside;
     int materialId;
 };

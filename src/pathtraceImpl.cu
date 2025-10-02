@@ -8,6 +8,7 @@
 #include "sceneStructs.h"
 #include "utilities.h"
 #include "mesh.h"
+#include "material.h"
 
 #define USE_MESH_GRID_ACCELERATION 1
 
@@ -92,8 +93,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 __device__ float getIntersectionGeometryIndex(
     glm::vec3& debug,
     int& hit_geom_index,
-    glm::vec3& intersect_point,
-    glm::vec3& normal,
+    ShadeableIntersection& OutIntersect,
     Ray& InRayWorld,
     int geoms_size,
 	Geom* geoms, 
@@ -104,9 +104,7 @@ __device__ float getIntersectionGeometryIndex(
     float t_min = FLT_MAX;
     bool outside = true;
     glm::vec3 debug1;
-    glm::vec3 IntersectPos_World;
-    glm::vec3 IntersectNor_World;
-
+    ShadeableIntersection TempIntersect;
     // naive parse through global geoms
 
     for (int i = 0; i < geoms_size; i++)
@@ -115,21 +113,21 @@ __device__ float getIntersectionGeometryIndex(
 
         if (geom.type == CUBE)
         {
-            t = boxIntersectionTest(geom, InRayWorld, IntersectPos_World, IntersectNor_World, outside);
+            t = boxIntersectionTest(geom, InRayWorld, TempIntersect);
         }
         else if (geom.type == SPHERE)
         {
-            t = sphereIntersectionTest(geom, InRayWorld, IntersectPos_World, IntersectNor_World, outside);
+            t = sphereIntersectionTest(geom, InRayWorld, TempIntersect);
         }
     	else if (geom.type == PLANE)
         {
-            t = planeIntersectionTest(geom, InRayWorld, IntersectPos_World, IntersectNor_World, outside);
+            t = planeIntersectionTest(geom, InRayWorld, TempIntersect);
         }else if (geom.type==MESH && dev_staticMeshes!=nullptr)
         {
 #if USE_MESH_GRID_ACCELERATION
-			t = meshIntersectionTest_Optimized(debug, geom, dev_staticMeshes, InRayWorld, IntersectPos_World, IntersectNor_World);
+			t = meshIntersectionTest_Optimized(debug, geom, dev_staticMeshes, InRayWorld, TempIntersect);
 #else
-            t = meshIntersectionTest(geom, dev_staticMeshes, InRayWorld, IntersectPos_World, IntersectNor_World);
+            t = meshIntersectionTest(geom, dev_staticMeshes, InRayWorld, OutIntersect);
 #endif
         }
         // Compute the minimum t from the intersection tests to determine what
@@ -138,8 +136,7 @@ __device__ float getIntersectionGeometryIndex(
         {
             t_min = t;
             hit_geom_index = i;
-            intersect_point = IntersectPos_World;
-            normal = IntersectNor_World;
+			OutIntersect = TempIntersect;
         }
     }
     return t_min;
@@ -169,16 +166,15 @@ __global__ void computeIntersections(
         return;
 	}
     int hit_geom_index = -1;
-    glm::vec3 intersect_point;
-    glm::vec3 normal;
+    ShadeableIntersection Intersect = intersections[path_index];
     glm::vec3 debug;
     getIntersectionGeometryIndex(debug,
-        hit_geom_index, intersect_point, normal,
+        hit_geom_index, Intersect,
         pathSegment.ray, geoms_size, geoms, dev_staticMeshes);
 
     if (hit_geom_index == -1)
     {
-        intersections[path_index].materialId = -1;
+        Intersect.materialId = -1;
         device_materialIds[path_index] = -1;
         dev_pathAlive[tid] = -1;
     }
@@ -186,11 +182,12 @@ __global__ void computeIntersections(
     {
         // The ray hits something
         int matId = geoms[hit_geom_index].materialid;
-		intersections[path_index].intersectPoint = intersect_point;
-        intersections[path_index].materialId = matId;
         device_materialIds[path_index] = matId;
-        intersections[path_index].surfaceNormal = normal;
+        Intersect.materialId = matId;
+        pathSegment.debug = glm::vec3(Intersect.uv.x, Intersect.uv.y, 0.f);
+		pathSegments[path_index] = pathSegment;
     }
+	intersections[path_index] = Intersect;
 }
 
 __host__ __device__ float power_heuristic(float pdf_a, float pdf_b) {
@@ -218,15 +215,23 @@ __host__ __device__ float power_heuristic(float pdf_a, float pdf_b) {
 //    bsdfDiffuse(outBSDF, outPDF, out_wi, surfaceNormal, material);
 //}
 
-__device__ void bsdfPBR(glm::vec3& outBSDF, 
-    float& outPDF,
+__device__ void bsdfPBR(glm::vec3& debug, glm::vec3& outBSDF, 
+    float& outPDF, glm::vec2 uv,
     const Material& material, 
     glm::vec3 L /*Light direction*/, 
     glm::vec3 V /*View direction*/, 
     glm::vec3 N /*Normal*/)
 {
     BRDF_Params params;
-	params.baseColor = material.color;
+    if (material.BaseColorTextureProxy_Device != nullptr)
+    {
+        params.baseColor = GetColorDevice(*material.BaseColorTextureProxy_Device, uv);
+    }
+	else
+	{
+        params.baseColor = material.color;
+	}
+    debug = params.baseColor;
     params.roughness = material.roughness;
     float absdot = glm::abs(glm::dot(L, N));
     float pdf = absdot * INV_PI;
@@ -244,15 +249,15 @@ __device__ void bsdfPBR(glm::vec3& outBSDF,
     outBSDF = BRDF(params, L, V, N, tangentX, tangentY);
 }
 
-__device__ void bsdfPBRSample(glm::vec3& outBSDF, float& outPDF, Ray& out_wi, glm::vec3 ViewDir, glm::vec3 p,
-    glm::vec3 surfaceNormal, const Material& material,
+__device__ void bsdfPBRSample(glm::vec3& debug, glm::vec3& outBSDF, float& outPDF, Ray& out_wi, glm::vec3 ViewDir, glm::vec3 p,
+    glm::vec3 surfaceNormal, glm::vec2 uv, const Material& material, 
     thrust::default_random_engine& rng)
 {
     // set segment.ray.origin
     out_wi.origin = p;
     // set segment.ray.direction on random position
     out_wi.direction = calculateRandomDirectionInHemisphere(surfaceNormal, rng);
-	bsdfPBR(outBSDF, outPDF, material, out_wi.direction, ViewDir, surfaceNormal);
+	bsdfPBR(debug, outBSDF, outPDF, uv, material, out_wi.direction, ViewDir, surfaceNormal);
 }
 
 __device__ void bsdfEmitting(PathSegment* wo, Material* material)
@@ -299,13 +304,11 @@ __device__ bool sampleLightFromIntersections(
 	float dotProduct = abs(glm::dot(lightNormal, wj.direction));
     outPdf /= dotProduct;
     outPdf *= (distance * distance);
-	float t;
-	glm::vec3 tmp_intersect;
-	glm::vec3 tmp_normal;
 	int hit_geom_index = -1;
-	t = getIntersectionGeometryIndex(debug, 
+    ShadeableIntersection _;
+	getIntersectionGeometryIndex(debug, 
 		hit_geom_index,
-        tmp_intersect, tmp_normal,
+        _,
         wj, geomSize, geoms, mesh);
     outDirectLight += light_mat.emittance;
     return dotProduct > 0.0001f && hit_geom_index == 0;//&& glm::length(tmp_intersect - lightPosition) < 0.001f;
@@ -319,13 +322,14 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
     glm::vec3 directLight;
     float pdf_Ld;
     glm::vec3 bsdf;
+    glm::vec2 uv;
     float pdf_bsdf;
     Ray wj;
     bool sampledDirectLight = sampleLightFromIntersections(debug, directLight, pdf_Ld, wj, In_p, InLightMat, InLightGeom, GeomSize, Geoms, mesh, rng);
     if (sampledDirectLight)
     {
         //bsdfDiffuse(bsdf, pdf_bsdf, wj, InSurfaceNormal, &InSurfaceMat);
-        bsdfPBR(bsdf, pdf_bsdf, InSurfaceMat, wj.direction, InViewDir, InSurfaceNormal);
+        bsdfPBR(debug, bsdf, pdf_bsdf, uv, InSurfaceMat, wj.direction, InViewDir, InSurfaceNormal);
         float weight = power_heuristic(pdf_Ld, pdf_bsdf);
         OutContribution += directLight * bsdf * glm::max(0.f, glm::dot(wj.direction, InSurfaceNormal)) * weight / pdf_Ld;
     }
@@ -334,11 +338,11 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
 	    OutContribution = glm::vec3(0.f);
 		return;
     }
-    bsdfPBRSample(bsdf, pdf_bsdf, wj, InViewDir, In_p, InSurfaceNormal, InSurfaceMat, rng);
+    bsdfPBRSample(debug, bsdf, pdf_bsdf, wj, InViewDir, In_p, InSurfaceNormal, uv, InSurfaceMat, rng);
     //bsdfDiffuseSample(bsdf, pdf_bsdf, wj, In_p, InSurfaceNormal, &InSurfaceMat, rng);
     int hit_index = -1;
-    glm::vec3 intersect, normal;
-    getIntersectionGeometryIndex(debug,hit_index, intersect, normal, wj, GeomSize, Geoms, mesh);
+    ShadeableIntersection _;
+    getIntersectionGeometryIndex(debug,hit_index, _, wj, GeomSize, Geoms, mesh);
     if (hit_index != 0)
     {
        OutContribution = glm::vec3(0.f);
@@ -393,9 +397,15 @@ __global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
     glm::vec3 bsdf_at_p;
 	float pdf_bsdf;
     //bsdfDiffuseSample(bsdf_at_p, pdf_bsdf, wi, p, intersection.surfaceNormal, &material, rng);
-	bsdfPBRSample(bsdf_at_p, pdf_bsdf, wi, ViewDir, p, intersection.surfaceNormal, material, rng);
+	bsdfPBRSample(debug, bsdf_at_p, pdf_bsdf, wi, ViewDir, p, intersection.surfaceNormal, intersection.uv, material, rng);
 	path_segment.BSDF *= bsdf_at_p;
     path_segment.PDF *= pdf_bsdf;
+    if (path_segment.PDF<EPSILON)
+    {
+        path_segment.remainingBounces = 0;
+        pathSegments[pathIndex] = path_segment;
+		return;
+    }
 	path_segment.Cosine *= glm::max(0.f, glm::dot(wi.direction, intersection.surfaceNormal));
 
     path_segment.ray = wi;

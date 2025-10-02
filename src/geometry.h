@@ -47,9 +47,7 @@ __host__ __device__ inline glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v)
 __host__ __device__ float boxIntersectionTest(
     Geom box,
     Ray r,
-    glm::vec3& intersectionPoint,
-    glm::vec3& normal,
-    bool& outside);
+    ShadeableIntersection& OutIntersect);
 
 // CHECKITOUT
 /**
@@ -64,25 +62,19 @@ __host__ __device__ float boxIntersectionTest(
 __host__ __device__ float sphereIntersectionTest(
     Geom sphere,
     Ray r,
-    glm::vec3& intersectionPoint,
-    glm::vec3& normal,
-    bool& outside);
+    ShadeableIntersection& OutIntersect);
 __host__ __device__ float planeIntersectionTest(
     Geom plane,
     Ray r,
-    glm::vec3& intersectionPoint,
-    glm::vec3& normal,
-    bool& outside);
+    ShadeableIntersection& OutIntersect);
 __device__ void pdfPlane(float& OutPdf, Geom& InGeom);
 __host__ __device__ float meshIntersectionTest(
-    Geom plane, StaticMeshData_Device* dev_staticMeshes,
+    Geom plane, StaticMesh::RenderProxy* dev_staticMeshes,
     Ray ray_World,
-    glm::vec3& IntersectPos_World,
-    glm::vec3& IntersectNor_World);
+    ShadeableIntersection& OutIntersect);
 __device__ int GetPointBoundNextLayer(glm::vec3 p);
 __device__ float meshIntersectionTest_Optimized(
     glm::vec3& debug,
     Geom mesh, StaticMesh::RenderProxy* dev_staticMeshes,
     Ray ray_World,
-    glm::vec3& IntersectPos_World,
-    glm::vec3& IntersectNor_World);
+    ShadeableIntersection& OutIntersect);

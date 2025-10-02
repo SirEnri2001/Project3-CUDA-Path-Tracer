@@ -6,6 +6,7 @@
 
 #include <thrust/random.h>
 
+struct Material;
 // CHECKITOUT
 /**
  * Computes a cosine-weighted random direction in a hemisphere.

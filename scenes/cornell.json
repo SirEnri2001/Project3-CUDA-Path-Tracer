@@ -5,7 +5,7 @@
         {
             "TYPE":"Emitting",
             "RGB":[1.0, 1.0, 1.0],
-            "EMITTANCE":9.0
+            "EMITTANCE":4.0
         },
         "diffuse_white":
         {
@@ -24,9 +24,12 @@
         },
         "specular_white":
         {
-            "TYPE":"Specular",
+            "TYPE":"DefaultLit",
             "RGB":[0.98, 0.97, 0.98],
-            "ROUGHNESS":0.0
+            "ROUGHNESS":0.0,
+            "TEX":{
+                "BASECOLOR": "spot_texture.png"
+            }
         }
     },
     "Camera":
@@ -87,10 +90,10 @@
         {
             "TYPE":"mesh",
             "MATERIAL":"specular_white",
-            "MESH":"bunny",
-            "TRANS":[0.0,4.0,0.0],
-            "ROTAT":[0.0,0.0,0.0],
-            "SCALE":[20.0,20.0,20.0]
+            "MESH":"spot_triangulated",
+            "TRANS":[0.0,2.0,2.0],
+            "ROTAT":[0.0,90.0,0.0],
+            "SCALE":[2.0,2.0,2.0]
         }
     ]
 }

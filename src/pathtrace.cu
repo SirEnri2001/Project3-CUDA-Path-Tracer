@@ -21,6 +21,7 @@
 #include "common.h"
 #include "pathtraceImpl.h"
 #include "mesh.h"
+#include "material.h"
 
 #define SORT_RAYS 1
 
@@ -111,6 +112,9 @@ void pathtraceCreate(Scene* scene)
 	const Camera& cam = hst_scene->state.camera;
 	const int pixelcount = cam.resolution.x * cam.resolution.y;
 
+	checkCUDAError("before pathtraceInit");
+	TextureManager::Get()->LoadAllTexturesToDevice(scene->materials);
+
 	cudaMalloc(&dev_image, pixelcount * sizeof(glm::vec3));
 	cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
 
@@ -174,7 +178,6 @@ void pathtraceCreate(Scene* scene)
 	checkCUDAError("calculateMeshGridSpeedup");
 	int* indices = new int[GRID_SIZE];
 	cudaMemcpy(indices, Mesh->Proxy_Host->raw.GridIndicesStart_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
-	checkCUDAError("calculateMeshGridSpeedup");
 	for (int i = 0; i < GRID_SIZE; i++)
 	{
 		std::cout << indices[i] << ", ";
@@ -185,7 +188,6 @@ void pathtraceCreate(Scene* scene)
 	}
 	std::cout << "============" << std::endl;
 	cudaMemcpy(indices, Mesh->Proxy_Host->raw.GridIndicesEnd_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
-	checkCUDAError("calculateMeshGridSpeedup");
 	for (int i = 0; i < GRID_SIZE; i++)
 	{
 		std::cout << indices[i] << ", ";
@@ -194,6 +196,8 @@ void pathtraceCreate(Scene* scene)
 			std::cout << std::endl;
 		}
 	}
+	size_t stack_size = 8192; // 8KB
+	cudaDeviceSetLimit(cudaLimitStackSize, stack_size);
 }
 
 
@@ -207,6 +211,18 @@ void pathtraceFree()
 	checkCUDAError("pathtraceFree");
 }
 
+__host__ __device__
+bool is_nan(glm::vec3 v)
+{
+	return cuda::std::isnan(v.x) || cuda::std::isnan(v.y) || cuda::std::isnan(v.z);
+}
+
+__host__ __device__
+bool is_inf(glm::vec3 v)
+{
+	return cuda::std::isinf(v.x) || cuda::std::isinf(v.y) || cuda::std::isinf(v.z);
+}
+
 // Add the current iteration's output to the overall image
 __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iterationPaths, bool debug = false)
 {
@@ -215,9 +231,9 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
 	if (index < nPaths)
 	{
 		PathSegment iterationPath = iterationPaths[index];
-		bool bInvalidVal;
-		bInvalidVal = glm::any(glm::isnan(iterationPath.Contribution));
-		bInvalidVal = bInvalidVal || glm::any(glm::isinf(iterationPath.Contribution));
+		bool bInvalidVal = false;
+		bInvalidVal = is_nan(iterationPath.Contribution);
+		bInvalidVal = bInvalidVal || is_inf(iterationPath.Contribution);
 		if (bInvalidVal)
 		{
 			iterationPath.debug = glm::vec3(0, 1, 0);
@@ -281,14 +297,14 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 			);
 		}
 		{
-			struct isPathAlive
-			{
-				__host__ __device__
-				bool operator()(const int x)
-				{
-					return (x % 2) == 0;
-				}
-			};
+			//struct isPathAlive
+			//{
+			//	__host__ __device__
+			//	bool operator()(const int x)
+			//	{
+			//		return (x % 2) == 0;
+			//	}
+			//};
 			auto end_iter = thrust::remove(thrust::device, device_pathAlive, device_pathAlive + num_paths, -1);
 			num_paths = end_iter - device_pathAlive;
 //#if SORT_RAYS

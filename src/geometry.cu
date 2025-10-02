@@ -1,4 +1,6 @@
 #include "geometry.h"
+
+#include <glm/gtx/intersect.hpp>
 #include <thrust/random.h>
 
 #include "mesh.h"
@@ -99,9 +101,7 @@ __device__ void sampleGeometry(
 __host__ __device__ float boxIntersectionTest(
     Geom box,
     Ray r,
-    glm::vec3& intersectionPoint,
-    glm::vec3& normal,
-    bool& outside)
+    ShadeableIntersection& OutIntersect)
 {
     Ray q;
     q.origin = multiplyMV(box.inverseTransform, glm::vec4(r.origin, 1.0f));
@@ -137,16 +137,16 @@ __host__ __device__ float boxIntersectionTest(
 
     if (tmax >= tmin && tmax > 0)
     {
-        outside = true;
+        OutIntersect.outside = true;
         if (tmin <= 0)
         {
             tmin = tmax;
             tmin_n = tmax_n;
-            outside = false;
+            OutIntersect.outside = false;
         }
-        intersectionPoint = multiplyMV(box.transform, glm::vec4(getPointOnRay(q, tmin), 1.0f));
-        normal = glm::normalize(multiplyMV(box.invTranspose, glm::vec4(tmin_n, 0.0f)));
-        return glm::length(r.origin - intersectionPoint);
+        OutIntersect.intersectPoint = multiplyMV(box.transform, glm::vec4(getPointOnRay(q, tmin), 1.0f));
+        OutIntersect.surfaceNormal = glm::normalize(multiplyMV(box.invTranspose, glm::vec4(tmin_n, 0.0f)));
+        return glm::length(r.origin - OutIntersect.intersectPoint);
     }
 
     return -1;
@@ -206,9 +206,7 @@ __host__ __device__ float UniformBoxIntersectionTest(
 __host__ __device__ float sphereIntersectionTest(
     Geom sphere,
     Ray r,
-    glm::vec3& intersectionPoint,
-    glm::vec3& normal,
-    bool& outside)
+    ShadeableIntersection& OutIntersect)
 {
     float radius = .5;
 
@@ -239,32 +237,30 @@ __host__ __device__ float sphereIntersectionTest(
     else if (t1 > 0 && t2 > 0)
     {
         t = min(t1, t2);
-        outside = true;
+        OutIntersect.outside = true;
     }
     else
     {
         t = max(t1, t2);
-        outside = false;
+        OutIntersect.outside = false;
     }
 
     glm::vec3 objspaceIntersection = getPointOnRay(rt, t);
 
-    intersectionPoint = multiplyMV(sphere.transform, glm::vec4(objspaceIntersection, 1.f));
-    normal = glm::normalize(multiplyMV(sphere.invTranspose, glm::vec4(objspaceIntersection, 0.f)));
-    if (!outside)
+    OutIntersect.intersectPoint = multiplyMV(sphere.transform, glm::vec4(objspaceIntersection, 1.f));
+    OutIntersect.surfaceNormal = glm::normalize(multiplyMV(sphere.invTranspose, glm::vec4(objspaceIntersection, 0.f)));
+    if (!OutIntersect.outside)
     {
-        normal = -normal;
+        OutIntersect.surfaceNormal = -OutIntersect.surfaceNormal;
     }
 
-    return glm::length(r.origin - intersectionPoint);
+    return glm::length(r.origin - OutIntersect.intersectPoint);
 }
 
 __host__ __device__ float planeIntersectionTest(
     Geom plane,
     Ray r,
-    glm::vec3& intersectionPoint,
-    glm::vec3& normal,
-    bool& outside)
+    ShadeableIntersection& OutIntersect)
 {
     Ray q;
     q.origin = multiplyMV(plane.inverseTransform, glm::vec4(r.origin, 1.0f));
@@ -280,47 +276,66 @@ __host__ __device__ float planeIntersectionTest(
     {
         return -1;
     }
-    intersectionPoint = multiplyMV(plane.transform, glm::vec4(planeIntersect, 1.0f));
-    normal = glm::normalize(multiplyMV(plane.invTranspose, glm::vec4(glm::vec3(0.f, 1.f, 0.f), 0.0f)));
+    OutIntersect.intersectPoint = multiplyMV(plane.transform, glm::vec4(planeIntersect, 1.0f));
+    OutIntersect.surfaceNormal = glm::normalize(multiplyMV(plane.invTranspose, glm::vec4(glm::vec3(0.f, 1.f, 0.f), 0.0f)));
     if (q.direction.y>0.f)
     {
-		normal = -normal;
+        OutIntersect.surfaceNormal = -OutIntersect.surfaceNormal;
     }
-    return glm::length(r.origin - intersectionPoint);
+    return glm::length(r.origin - OutIntersect.intersectPoint);
 }
 
 __host__ __device__ float triangleIntersectionTest(
 	glm::vec3 p1, glm::vec3 p2, glm::vec3 p3,
-    Ray r,
-    glm::vec3& intersectionPoint,
-    glm::vec3& normal,
-	bool& front)
+    Ray r, glm::vec3& Pos, glm::vec3& Nor, glm::vec3& Bary, bool& Front)
 {
+#if 0
+    if (glm::intersectRayTriangle(r.origin, r.direction, p1, p2, p3, Bary))
+    {
+        Pos = p1 * Bary.x + p2 * Bary.y + p3 * Bary.z;
+        Nor = glm::normalize(glm::cross(p2 - p1, p3 - p1));
+        Front = glm::dot(Nor, r.direction) < 0.f;
+		return glm::length(r.origin - Pos);
+    }
+	return -1.f;
+#else
     glm::vec3 l1 = r.origin - p1;
 	glm::vec3 p12 = p2 - p1;
 	glm::vec3 p13 = p3 - p1;
-	normal = glm::normalize(glm::cross(p12, p13));
-	float t_vert = glm::dot(normal, l1);
-	float directDot = glm::dot(normal, r.direction);
+    Nor = glm::normalize(glm::cross(p12, p13));
+	float t_vert = glm::dot(Nor, l1);
+	float directDot = glm::dot(Nor, r.direction);
 	float t = t_vert / -directDot;
-    intersectionPoint = r.origin + r.direction * t;
-	glm::vec3 s1 = p1 - intersectionPoint;
-	glm::vec3 s2 = p2 - intersectionPoint;
-	glm::vec3 s3 = p3 - intersectionPoint;
-    if (glm::dot(normal, glm::cross(s1, s2)) >= 0.f &&
-        glm::dot(normal, glm::cross(s2, s3)) >= 0.f &&
-        glm::dot(normal, glm::cross(s3, s1)) >= 0.f)
+    Pos = r.origin + r.direction * t;
+	glm::vec3 s1 = p1 - Pos;
+	glm::vec3 s2 = p2 - Pos;
+	glm::vec3 s3 = p3 - Pos;
+    float c1, c2, c3;
+	c1 = glm::dot(Nor, glm::cross(s1, s2));
+    c2 = glm::dot(Nor, glm::cross(s2, s3));
+	c3 = glm::dot(Nor, glm::cross(s3, s1));
+    if (c1 >= 0.f &&
+        c2 >= 0.f &&
+        c3 >= 0.f)
     {
+		Front = t_vert > 0.f;
+		float area = glm::length(glm::cross(p12, p13));
+		float area1 = glm::length(glm::cross(p2 - Pos, p3 - Pos));
+		float area2 = glm::length(glm::cross(p3 - Pos, p1 - Pos));
+		float area3 = glm::length(glm::cross(p1 - Pos, p2 - Pos));
+		Bary.x = area1 / area;
+		Bary.y = area2 / area;
+		Bary.z = area3 / area;
         return t;// glm::length(r.origin - intersectionPoint); // DAMN when use glm::length the ray which from the mesh will hit the mesh itself within a very short distance
 	}
 	return -1.f;
+#endif
 }
 
 __host__ __device__ float meshIntersectionTest(
     Geom mesh, StaticMesh::RenderProxy* dev_staticMeshes,
     Ray ray_World,
-    glm::vec3& IntersectPos_World,
-    glm::vec3& IntersectNor_World)
+    ShadeableIntersection& OutIntersect)
 {
 	int totalObjectCount = dev_staticMeshes->VertexCount / 3;
     Ray ray_Local;
@@ -331,6 +346,8 @@ __host__ __device__ float meshIntersectionTest(
 	glm::vec3 IntersectNor_Local;
     glm::vec3 Pos_Temp;
 	glm::vec3 Nor_Temp;
+    glm::vec3 bary;
+    glm::vec2 uv1, uv2, uv3;
 	bool front;
     float t_min = FLT_MAX;
     float t;
@@ -344,6 +361,7 @@ __host__ __device__ float meshIntersectionTest(
             ray_Local,
             Pos_Temp,
             Nor_Temp,
+            bary,
             front
         );
         if (t>0.f && t < t_min)
@@ -351,15 +369,20 @@ __host__ __device__ float meshIntersectionTest(
 	        t_min = glm::min(t, t_min);
             IntersectPos_Local = Pos_Temp;
             IntersectNor_Local = Nor_Temp;
+			uv1 = dev_staticMeshes->raw.VertexTexCoord_Device[3 * i + 0];
+            uv2 = dev_staticMeshes->raw.VertexTexCoord_Device[3 * i + 1];
+			uv3 = dev_staticMeshes->raw.VertexTexCoord_Device[3 * i + 2];
         }
     }
     if (t_min==FLT_MAX)
     {
 		return -1.f;
     }
-    IntersectPos_World = multiplyMV(mesh.transform, glm::vec4(IntersectPos_Local, 1.0f));
-    IntersectNor_World = glm::normalize(multiplyMV(mesh.invTranspose, glm::vec4(IntersectNor_Local, 0.0f)));
-    minDistance = glm::length(ray_World.origin - IntersectPos_World);
+	OutIntersect.outside = front;
+	OutIntersect.uv = uv1 * bary.x + uv2 * bary.y + uv3 * bary.z;
+    OutIntersect.intersectPoint = multiplyMV(mesh.transform, glm::vec4(IntersectPos_Local, 1.0f));
+    OutIntersect.surfaceNormal = glm::normalize(multiplyMV(mesh.invTranspose, glm::vec4(IntersectNor_Local, 0.0f)));
+    minDistance = glm::length(ray_World.origin - OutIntersect.intersectPoint);
 	return minDistance;
 }
 
@@ -398,8 +421,8 @@ __device__ int GetPointBoundIndex(glm::vec3 p1, int layer) // p1 within [0,1]
 __device__ float IntersectBoundingBoxLayer(
     glm::vec3& debug,
     const Geom& MeshGeom,
-    Ray InRayWorld, glm::vec3& IntersectPos_World,
-    glm::vec3& IntersectNor_World, 
+    Ray InRayWorld, 
+    ShadeableIntersection& OutIntersect,
     int layer, 
     StaticMesh::RenderProxy* dev_staticMeshes)
 {
@@ -466,8 +489,9 @@ __device__ float IntersectBoundingBoxLayer(
             float minDistance = -1.f;
             glm::vec3 IntersectPos_Local;
             glm::vec3 IntersectNor_Local;
-            glm::vec3 Pos_Temp;
-            glm::vec3 Nor_Temp;
+            glm::vec2 IntersectUV;
+            glm::vec3 Bary_Temp;
+            glm::vec2 uv1, uv2, uv3;
             bool front;
             float t_min = FLT_MAX;
             float t;
@@ -480,22 +504,28 @@ __device__ float IntersectBoundingBoxLayer(
                     dev_staticMeshes->raw.VertexPosition_Device[3 * triangleId + 1],
                     dev_staticMeshes->raw.VertexPosition_Device[3 * triangleId + 2],
                     ray_Local,
-                    Pos_Temp,
-                    Nor_Temp,
+                    tempPos,
+                    tempNor,
+                    Bary_Temp,
                     front
                 );
                 if (t > 0.f && t < t_min)
                 {
+					uv1 = dev_staticMeshes->raw.VertexTexCoord_Device[3 * triangleId + 0];
+                    uv2 = dev_staticMeshes->raw.VertexTexCoord_Device[3 * triangleId + 1];
+                    uv3 = dev_staticMeshes->raw.VertexTexCoord_Device[3 * triangleId + 2];
+                    IntersectUV = uv1 * Bary_Temp.x + uv2 * Bary_Temp.y + uv3 * Bary_Temp.z;
                     t_min = glm::min(t, t_min);
-                    IntersectPos_Local = Pos_Temp;
-                    IntersectNor_Local = Nor_Temp;
+                    IntersectPos_Local = tempPos;
+                    IntersectNor_Local = tempNor;
                 }
             }
             if (t_min != FLT_MAX)
             {
-                IntersectPos_World = multiplyMV(MeshGeom.transform, glm::vec4(IntersectPos_Local, 1.0f));
-                IntersectNor_World = glm::normalize(multiplyMV(MeshGeom.invTranspose, glm::vec4(IntersectNor_Local, 0.0f)));
-                minDistance = glm::length(InRayWorld.origin - IntersectPos_World);
+                OutIntersect.intersectPoint = multiplyMV(MeshGeom.transform, glm::vec4(IntersectPos_Local, 1.0f));
+                OutIntersect.surfaceNormal = glm::normalize(multiplyMV(MeshGeom.invTranspose, glm::vec4(IntersectNor_Local, 0.0f)));
+				OutIntersect.uv = IntersectUV;
+                minDistance = glm::length(InRayWorld.origin - OutIntersect.intersectPoint);
                 return minDistance;
             }
         }
@@ -520,28 +550,25 @@ __device__ float meshIntersectionTest_Optimized(
     glm::vec3& debug,
     Geom mesh, StaticMesh::RenderProxy* dev_staticMeshes,
     Ray ray_World,
-    glm::vec3& IntersectPos_World,
-    glm::vec3& IntersectNor_World)
+    ShadeableIntersection& OutIntersection)
 {
     float t_min = FLT_MAX;
     float t;
-	glm::vec3 tempNor, tempPos;
+    ShadeableIntersection TempIntersect;
     for (int curLayer = 0; curLayer < GRID_LAYERS; curLayer++)
     {
         t = IntersectBoundingBoxLayer(
             debug, 
             mesh,
             ray_World,
-            tempPos,
-            tempNor,
+            TempIntersect,
             curLayer,
             dev_staticMeshes
         );
         if (t > 0.f && t < t_min)
         {
+            OutIntersection = TempIntersect;
             t_min = t;
-            IntersectNor_World = tempNor;
-            IntersectPos_World = tempPos;
 		}
     }
     if (t_min!=FLT_MAX)
