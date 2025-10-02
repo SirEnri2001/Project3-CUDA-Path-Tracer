@@ -3,6 +3,7 @@
 #include <iostream>
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "common.h"
+#include "MeshLoader/tiny_gltf.h"
 #include "MeshLoader/tiny_obj_loader.h"
 
 void LoadObjImpl(StaticMesh& Mesh, std::string FilePath)
@@ -68,17 +69,104 @@ void LoadObjImpl(StaticMesh& Mesh, std::string FilePath)
                     tinyobj::real_t ty = attrib.texcoords[2 * size_t(idx.texcoord_index) + 1];
                     Mesh.Data.VertexTexCoord_Host[3 * f + v] = glm::vec2(tx, ty);
                 }
-
-                // Optional: vertex colors
-                // tinyobj::real_t red   = attrib.colors[3*size_t(idx.vertex_index)+0];
-                // tinyobj::real_t green = attrib.colors[3*size_t(idx.vertex_index)+1];
-                // tinyobj::real_t blue  = attrib.colors[3*size_t(idx.vertex_index)+2];
             }
             index_offset += fv;
 
             // per-face material
             shapes[s].mesh.material_ids[f];
         }
+    }
+}
+
+void LoadGLTFImpl(StaticMesh& Mesh, const tinygltf::Mesh& gltfMesh, const tinygltf::Model& model)
+{
+    for (size_t j = 0; j < 1 /*gltfMesh.primitives.size()*/; ++j) {
+        const tinygltf::Primitive& primitive = gltfMesh.primitives[j];
+        if (primitive.mode != TINYGLTF_MODE_TRIANGLES) {
+            std::cout << "Only triangle mode is supported!" << std::endl;
+            continue;
+        }
+        const tinygltf::Accessor& posAccessor = model.accessors[primitive.attributes.find("POSITION")->second];
+        const tinygltf::BufferView& posView = model.bufferViews[posAccessor.bufferView];
+        const tinygltf::Buffer& posBuffer = model.buffers[posView.buffer];
+        const tinygltf::Accessor& normAccessor = model.accessors[primitive.attributes.find("NORMAL")->second];
+        const tinygltf::BufferView& normView = model.bufferViews[normAccessor.bufferView];
+        const tinygltf::Buffer& normBuffer = model.buffers[normView.buffer];
+        const tinygltf::Accessor& texAccessor = model.accessors[primitive.attributes.find("TEXCOORD_0")->second];
+        const tinygltf::BufferView& texView = model.bufferViews[texAccessor.bufferView];
+        const tinygltf::Buffer& texBuffer = model.buffers[texView.buffer];
+        const tinygltf::Accessor& indexAccessor = model.accessors[primitive.indices];
+        const tinygltf::BufferView& indexView = model.bufferViews[indexAccessor.bufferView];
+        const tinygltf::Buffer& indexBuffer = model.buffers[indexView.buffer];
+        Mesh.Data.VertexCount = static_cast<unsigned int>(indexAccessor.count);
+        Mesh.Data.VertexPosition_Host.resize(Mesh.Data.VertexCount);
+        Mesh.Data.VertexNormal_Host.resize(Mesh.Data.VertexCount);
+        Mesh.Data.VertexTexCoord_Host.resize(Mesh.Data.VertexCount);
+
+        // read triangles
+        size_t posStride = posView.byteStride ? posView.byteStride / sizeof(float) : 3;
+        size_t normStride = normView.byteStride ? normView.byteStride / sizeof(float) : 3;
+        size_t texStride = texView.byteStride ? texView.byteStride / sizeof(float) : 2;
+        const float* positionData = reinterpret_cast<const float*>(&posBuffer.data[posView.byteOffset + posAccessor.byteOffset]);
+        const float* normalData = reinterpret_cast<const float*>(&normBuffer.data[normView.byteOffset + normAccessor.byteOffset]);
+        const float* texCoordData = reinterpret_cast<const float*>(&texBuffer.data[texView.byteOffset + texAccessor.byteOffset]);
+
+        std::vector<size_t> indices(indexAccessor.count);
+
+        if (indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
+        {
+            const uint16_t* InIndices = reinterpret_cast<const uint16_t*>(&indexBuffer.data[indexView.byteOffset + indexAccessor.byteOffset]);
+            for (size_t i = 0; i < indexAccessor.count; ++i) {
+                indices[i] = InIndices[i];
+            }
+        }
+        else if (indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT)
+        {
+            const uint32_t* InIndices = reinterpret_cast<const uint32_t*>(&indexBuffer.data[indexView.byteOffset + indexAccessor.byteOffset]);
+            for (size_t i = 0; i < indexAccessor.count; ++i) {
+                indices[i] = InIndices[i];
+            }
+        }
+        else if (indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE)
+        {
+            const uint8_t* InIndices = reinterpret_cast<const uint8_t*>(&indexBuffer.data[indexView.byteOffset + indexAccessor.byteOffset]);
+            for (size_t i = 0; i < indexAccessor.count; ++i) {
+                indices[i] = InIndices[i];
+            }
+        }
+        else {
+            std::cout << "Unsupported index component type!" << std::endl;
+            continue;
+        }
+        assert(indices.size() % 3 == 0);
+        // store data to staticmesh object
+        for (size_t tid = 0; tid < indices.size(); tid += 3) {
+            for (size_t indId = tid; indId < tid + 3; indId++)
+            {
+                Mesh.Data.VertexPosition_Host[3 * tid + indId] = {
+                    positionData[indices[tid + indId] * posStride],
+                    positionData[indices[tid + indId] * posStride + 1],
+                    positionData[indices[tid + indId] * posStride + 2]
+                };
+
+                Mesh.Data.VertexNormal_Host[3 * tid + indId] = {
+                    normalData[indices[tid + indId] * normStride],
+                    normalData[indices[tid + indId] * normStride + 1],
+                    normalData[indices[tid + indId] * normStride + 2]
+                };
+
+                Mesh.Data.VertexTexCoord_Host[3 * tid + indId] = {
+                texCoordData[indices[tid + indId] * texStride],
+                texCoordData[indices[tid + indId] * texStride + 1]
+                };
+            }
+        }
+
+        for (size_t v = 0; v < Mesh.Data.VertexCount; ++v) {
+            Mesh.Data.boxMin = glm::min(Mesh.Data.boxMin, Mesh.Data.VertexPosition_Host[v]);
+            Mesh.Data.boxMax = glm::max(Mesh.Data.boxMax, Mesh.Data.VertexPosition_Host[v]);
+        }
+
     }
 }
 
@@ -96,7 +184,7 @@ Data()
 
 StaticMesh::StaticMesh()
 {
-	
+	Proxy_Host = nullptr;
 }
 
 
@@ -175,9 +263,15 @@ StaticMeshManager* StaticMeshManager::Get()
 
 StaticMesh* StaticMeshManager::LoadObj(std::string MeshName, std::string FilePath)
 {
-    Meshes[MeshName] = std::make_unique<StaticMesh>();
-    StaticMesh* Mesh = Meshes[MeshName].get();
+    StaticMesh* Mesh = CreateAndGetMesh(MeshName);
     LoadObjImpl(*Mesh, FilePath);
+    return Mesh;
+}
+
+StaticMesh* StaticMeshManager::LoadGLTF(std::string MeshName, const tinygltf::Mesh& gltfMesh, const tinygltf::Model& model)
+{
+    StaticMesh* Mesh = CreateAndGetMesh(MeshName);
+    LoadGLTFImpl(*Mesh, gltfMesh, model);
     return Mesh;
 }
 
@@ -200,3 +294,15 @@ StaticMesh* StaticMeshManager::GetMesh(std::string MeshName)
     return Meshes[MeshName].get();
 }
 
+void StaticMeshManager::CreateRenderProxyForAll()
+{
+	// Create Proxy for all meshes
+	for (auto& NameMesh : Meshes)
+	{
+		auto* Mesh = NameMesh.second.get();
+        if (Mesh->Proxy_Host==nullptr)
+        {
+            Mesh->CreateProxy();
+        }
+	}
+}

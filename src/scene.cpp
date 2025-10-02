@@ -23,25 +23,33 @@
 using namespace std;
 using json = nlohmann::json;
 
-Scene::Scene(string filename)
+Scene::Scene()
 {
-    cout << "Reading scene from " << filename << " ..." << endl;
-    cout << " " << endl;
-    auto ext = filename.substr(filename.find_last_of('.'));
-    if (ext == ".json")
+}
+
+void Scene::DestroySceneRenderProxy()
+{
+    if (Proxy_Host)
     {
-        loadFromJSON(filename);
-        return;
-    }
-    else
-    {
-        cout << "Couldn't read from " << filename << endl;
-        exit(-1);
+        cudaFree(Proxy_Device);
+        cudaFree(Proxy_Host->geoms_Device);
+        cudaFree(Proxy_Host->materials_Device);
+        delete Proxy_Host;
+        Proxy_Host = nullptr;
     }
 }
 
-void Scene::loadFromJSON(const std::string& jsonName)
+
+Scene::~Scene()
 {
+    DestroySceneRenderProxy();
+}
+
+
+void Scene::ReadJSON(const std::string& jsonName)
+{
+    cout << "Reading scene from " << jsonName << " ..." << endl;
+    cout << " " << endl;
     std::ifstream f(jsonName);
     json data = json::parse(f);
     const auto& materialsData = data["Materials"];
@@ -51,7 +59,6 @@ void Scene::loadFromJSON(const std::string& jsonName)
         const auto& name = item.key();
         const auto& p = item.value();
         Material newMaterial{};
-        // TODO: handle materials loading differently
         if (p["TYPE"] == "Diffuse")
         {
             const auto& col = p["RGB"];
@@ -62,6 +69,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
             const auto& col = p["RGB"];
             newMaterial.color = glm::vec3(col[0], col[1], col[2]);
             newMaterial.emittance = p["EMITTANCE"];
+			newMaterial.isLight = true;
         }
         else if (p["TYPE"] == "Specular")
         {
@@ -101,7 +109,8 @@ void Scene::loadFromJSON(const std::string& jsonName)
         }else if (type=="mesh")
         {
             newGeom.type = MESH;
-            mesh = p["MESH"];
+            std::string meshName = p["MESH"];
+            newGeom.Mesh_Host = StaticMeshManager::Get()->LoadObj(meshName, std::string("../models/") + meshName + ".obj");
         }else
         {
             newGeom.type = CUBE;
@@ -152,9 +161,18 @@ void Scene::loadFromJSON(const std::string& jsonName)
     int arraylen = camera.resolution.x * camera.resolution.y;
     state.image.resize(arraylen);
     std::fill(state.image.begin(), state.image.end(), glm::vec3());
+    int index = 0;
+    for (auto& g : geoms)
+    {
+	    if (materials[g.materialid].isLight)
+	    {
+            lights.push_back(index);
+	    }
+        index++;
+    }
 }
 
-void ReadGLTF(Scene* InOutScene, std::string filename)
+void Scene::ReadGLTF(std::string filename)
 {
     tinygltf::Model model;
     tinygltf::TinyGLTF loader;
@@ -177,9 +195,9 @@ void ReadGLTF(Scene* InOutScene, std::string filename)
         exit(1);
     }
 
-    // 假设我们处理默认场景
     const tinygltf::Scene& scene = model.scenes[model.defaultScene > -1 ? model.defaultScene : 0];
 
+	// Load Textures
     for (size_t i = 0; i < model.textures.size(); i++)
     {
         const tinygltf::Texture& baseColorTex = model.textures[i];
@@ -188,6 +206,7 @@ void ReadGLTF(Scene* InOutScene, std::string filename)
         TextureManager::Get()->RegisterTextureName(baseColorTex.name, image.name);
     }
 
+	// Load Materials
     for (size_t i = 0; i < model.materials.size(); i++)
     {
         const tinygltf::Material& material = model.materials[i];
@@ -208,102 +227,18 @@ void ReadGLTF(Scene* InOutScene, std::string filename)
         if (material.normalTexture.index >= 0) {
 
         }
-        InOutScene->materials.push_back(mat);
+        if (material.emissiveTexture.index >= 0) {
+            mat.isLight = true;
+            mat.emittance = 1.0f;
+		}
+        materials.push_back(mat);
     }
 
+	// Load Meshes
     for (int i = 0; i < model.meshes.size(); i++)
     {
         const tinygltf::Mesh& gltfMesh = model.meshes[i];
-        for (size_t j = 0; j < gltfMesh.primitives.size(); ++j) {
-            const tinygltf::Primitive& primitive = gltfMesh.primitives[j];
-            if (primitive.mode != TINYGLTF_MODE_TRIANGLES) {
-                std::cout << "Only triangle mode is supported!" << std::endl;
-                continue;
-            }
-            StaticMesh& Mesh = *StaticMeshManager::Get()->CreateAndGetMesh(gltfMesh.name);
-            // 读取顶点属性
-            const tinygltf::Accessor& posAccessor = model.accessors[primitive.attributes.find("POSITION")->second];
-            const tinygltf::BufferView& posView = model.bufferViews[posAccessor.bufferView];
-            const tinygltf::Buffer& posBuffer = model.buffers[posView.buffer];
-            const tinygltf::Accessor& normAccessor = model.accessors[primitive.attributes.find("NORMAL")->second];
-            const tinygltf::BufferView& normView = model.bufferViews[normAccessor.bufferView];
-            const tinygltf::Buffer& normBuffer = model.buffers[normView.buffer];
-            const tinygltf::Accessor& texAccessor = model.accessors[primitive.attributes.find("TEXCOORD_0")->second];
-            const tinygltf::BufferView& texView = model.bufferViews[texAccessor.bufferView];
-            const tinygltf::Buffer& texBuffer = model.buffers[texView.buffer];
-            const tinygltf::Accessor& indexAccessor = model.accessors[primitive.indices];
-            const tinygltf::BufferView& indexView = model.bufferViews[indexAccessor.bufferView];
-            const tinygltf::Buffer& indexBuffer = model.buffers[indexView.buffer];
-            Mesh.Data.VertexCount = static_cast<unsigned int>(indexAccessor.count);
-            Mesh.Data.VertexPosition_Host.resize(Mesh.Data.VertexCount);
-            Mesh.Data.VertexNormal_Host.resize(Mesh.Data.VertexCount);
-            Mesh.Data.VertexTexCoord_Host.resize(Mesh.Data.VertexCount);
-
-            // read triangles
-            size_t posStride = posView.byteStride ? posView.byteStride / sizeof(float) : 3;
-            size_t normStride = normView.byteStride ? normView.byteStride / sizeof(float) : 3;
-            size_t texStride = texView.byteStride ? texView.byteStride / sizeof(float) : 2;
-            const float* positionData = reinterpret_cast<const float*>(&posBuffer.data[posView.byteOffset + posAccessor.byteOffset]);
-            const float* normalData = reinterpret_cast<const float*>(&normBuffer.data[normView.byteOffset + normAccessor.byteOffset]);
-            const float* texCoordData = reinterpret_cast<const float*>(&texBuffer.data[texView.byteOffset + texAccessor.byteOffset]);
-
-            std::vector<size_t> indices(indexAccessor.count);
-
-            if (indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
-            {
-                const uint16_t* InIndices = reinterpret_cast<const uint16_t*>(&indexBuffer.data[indexView.byteOffset + indexAccessor.byteOffset]);
-                for (size_t i = 0; i < indexAccessor.count; ++i) {
-                    indices[i] = InIndices[i];
-                }
-            }
-            else if (indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT)
-            {
-                const uint32_t* InIndices = reinterpret_cast<const uint32_t*>(&indexBuffer.data[indexView.byteOffset + indexAccessor.byteOffset]);
-                for (size_t i = 0; i < indexAccessor.count; ++i) {
-                    indices[i] = InIndices[i];
-                }
-            }
-            else if (indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE)
-            {
-                const uint8_t* InIndices = reinterpret_cast<const uint8_t*>(&indexBuffer.data[indexView.byteOffset + indexAccessor.byteOffset]);
-                for (size_t i = 0; i < indexAccessor.count; ++i) {
-                    indices[i] = InIndices[i];
-                }
-            }
-            else {
-                std::cout << "Unsupported index component type!" << std::endl;
-                continue;
-            }
-            assert(indices.size() % 3 == 0);
-            // store data to staticmesh object
-            for (size_t tid = 0; tid < indices.size(); tid += 3) {
-                for (size_t indId = tid; indId < tid + 3; indId++)
-                {
-                    Mesh.Data.VertexPosition_Host[3 * tid + indId] = {
-                        positionData[indices[tid + indId] * posStride],
-                        positionData[indices[tid + indId] * posStride + 1],
-                        positionData[indices[tid + indId] * posStride + 2]
-                    };
-
-                    Mesh.Data.VertexNormal_Host[i] = {
-                        normalData[indices[tid + indId] * normStride],
-                        normalData[indices[tid + indId] * normStride + 1],
-                        normalData[indices[tid + indId] * normStride + 2]
-                    };
-
-                    Mesh.Data.VertexTexCoord_Host[i] = {
-                    texCoordData[indices[tid + indId] * texStride],
-                    texCoordData[indices[tid + indId] * texStride + 1]
-                    };
-                }
-            }
-
-            for (size_t v = 0; v < Mesh.Data.VertexCount; ++v) {
-                Mesh.Data.boxMin = glm::min(Mesh.Data.boxMin, Mesh.Data.VertexPosition_Host[v]);
-                Mesh.Data.boxMax = glm::max(Mesh.Data.boxMax, Mesh.Data.VertexPosition_Host[v]);
-            }
-
-        }
+        StaticMeshManager::Get()->LoadGLTF(gltfMesh.name, gltfMesh, model);
     }
 
     for (size_t i = 0; i < scene.nodes.size(); ++i) {
@@ -319,10 +254,68 @@ void ReadGLTF(Scene* InOutScene, std::string filename)
         geom.transform = mat;
         geom.inverseTransform = glm::inverse(mat);
         geom.invTranspose = glm::transpose(geom.inverseTransform);
-        // 处理节点变换（矩阵，或 TRS 信息）
-        // 如果节点包含网格
         if (node.mesh >= 0) {
+			geom.materialid = model.meshes[node.mesh].primitives[0].material;
 			geom.Mesh_Host = StaticMeshManager::Get()->GetMesh(model.meshes[node.mesh].name);
         }
+		geoms.push_back(geom);
     }
+    int index = 0;
+    for (auto& g : geoms)
+    {
+        if (materials[g.materialid].isLight)
+        {
+            lights.push_back(index);
+        }
+        index++;
+    }
+}
+
+void Scene::CreateRenderProxyForAll()
+{
+	StaticMeshManager::Get()->CreateRenderProxyForAll();
+	StaticMeshManager::Get()->CalculateOctreeStructureCUDA();
+    TextureManager::Get()->LoadAllTexturesToDevice();
+
+	// Link Material texture pointers to device proxies
+    for (auto& Mat : materials)
+    {
+        Mat.BaseColorTextureProxy_Device = nullptr;
+        if (Mat.BaseColorTexture)
+        {
+            Mat.BaseColorTextureProxy_Device = Mat.BaseColorTexture->Proxy_Device;
+        }
+    }
+
+	// Link Geom mesh pointers to device proxies
+    for (auto& g : geoms)
+    {
+        g.MeshProxy_Device = nullptr;
+        if (g.Mesh_Host)
+        {
+			g.MeshProxy_Device = g.Mesh_Host->Proxy_Device;
+        }
+    }
+
+    if (Proxy_Host)
+    {
+        DestroySceneRenderProxy();
+    }
+
+	Proxy_Host = new RenderProxy();
+	Proxy_Host->geoms_size = geoms.size();
+	Proxy_Host->lights_size = lights.size();
+	Proxy_Host->materials_size = materials.size();
+
+    cudaMalloc((void**)&Proxy_Host->geoms_Device, sizeof(Geom) * geoms.size());
+	cudaMemcpy(Proxy_Host->geoms_Device, geoms.data(), sizeof(Geom) * geoms.size(), cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&Proxy_Host->materials_Device, sizeof(Material) * materials.size());
+    cudaMemcpy(Proxy_Host->materials_Device, materials.data(), sizeof(Material) * materials.size(), cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&Proxy_Host->light_index_Device, sizeof(int) * lights.size());
+	cudaMemcpy(Proxy_Host->light_index_Device, lights.data(), sizeof(int) * lights.size(), cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&Proxy_Device, sizeof(Scene::RenderProxy));
+    cudaMemcpy(Proxy_Device, Proxy_Host, sizeof(Scene::RenderProxy), cudaMemcpyHostToDevice);
 }

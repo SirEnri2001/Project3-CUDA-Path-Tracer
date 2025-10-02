@@ -345,15 +345,26 @@ int main(int argc, char** argv)
 
     if (argc < 2)
     {
-        printf("Usage: %s SCENEFILE.json\n", argv[0]);
+        printf("Usage: %s SCENEFILE.json / SCENEFILE.gltf\n", argv[0]);
         return 1;
     }
 
-    const char* sceneFile = argv[1];
+    std::string sceneFile = argv[1];
 
     // Load scene file
-    scene = new Scene(sceneFile);
-
+    scene = new Scene();
+    if (sceneFile.find(".json")!=std::string::npos)
+    {
+        scene->ReadJSON(sceneFile);
+    }
+    else if (sceneFile.find(".gltf") != std::string::npos)
+    {
+        scene->ReadGLTF(sceneFile);
+    }else
+    {
+        printf("Usage: %s SCENEFILE.json / SCENEFILE.gltf\n", argv[0]);
+        return 1;
+    }
     //Create Instance for ImGUIData
     guiData = new GuiDataContainer();
 
@@ -458,7 +469,7 @@ void runCuda()
 
         // execute the kernel
         int frame = 0;
-        pathtrace(pbo_dptr, frame, iteration);
+        pathtrace(scene, pbo_dptr, frame, iteration);
 
         // unmap buffer object
         cudaGLUnmapBufferObject(pbo);

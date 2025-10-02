@@ -27,35 +27,20 @@ struct Material
     float hasRefractive;
     float indexOfRefraction;
     float emittance;
+    bool isLight = false;
 };
-extern std::vector<Material> Materials;
-
-void CreateTextureFromFile(Texture& InOutTexture, std::string Filename);
-void FreeTexture(Texture& InOutTexture);
-
-__device__ glm::vec3 GetColorDevice(const Texture::RenderProxy& InTexture, glm::vec2 uv);
 
 class TextureManager
 {
     std::unordered_map<std::string, Texture> Textures;
     std::unordered_map<std::string, std::string> TextureNameToImageName;
 public:
-    void LoadAllTexturesToDevice(std::vector<Material>& InOutMats);
+    void LoadAllTexturesToDevice();
     Texture* PreloadTexture(std::string Filename);
     Texture* PreloadTexture(std::string ImageName, size_t width, size_t height, const std::vector<unsigned char>& Data);
     Texture* GetByTextureName(std::string TexName);
     void RegisterTextureName(std::string TexName, std::string ImageName);
     TextureManager();
-    //Texture* GetTexture(const std::string& Filename)
-    //{
-    //    auto iter = Textures.find(Filename);
-    //    if (iter != Textures.end())
-    //        return &iter->second;
-    //    Texture newTex;
-    //    CreateTextureFromFile(newTex, Filename);
-    //    Textures[Filename] = newTex;
-    //    return &Textures[Filename];
-    //}
     static TextureManager* Get();
 
     ~TextureManager();

@@ -8,13 +8,28 @@ struct Material;
 class Scene
 {
 private:
-    void loadFromJSON(const std::string& jsonName);
 public:
-    Scene(std::string filename);
-
+    Scene();
+    ~Scene();
+    void ReadJSON(const std::string& jsonName);
+    void ReadGLTF(std::string filename);
+    void CreateRenderProxyForAll();
+    void DestroySceneRenderProxy();
     std::vector<Geom> geoms;
+    std::vector<int> lights;
     std::vector<Material> materials;
     RenderState state;
-    std::string mesh;
+
+    struct RenderProxy
+    {
+		Geom* geoms_Device = nullptr;
+		int geoms_size = 0;
+		int* light_index_Device = nullptr;
+		int lights_size = 0;
+		Material* materials_Device = nullptr;
+		int materials_size = 0;
+    };
+
+	RenderProxy* Proxy_Host = nullptr;
+    RenderProxy* Proxy_Device = nullptr;
 };
-void ReadGLTF(Scene* InOutScene, std::string filename);

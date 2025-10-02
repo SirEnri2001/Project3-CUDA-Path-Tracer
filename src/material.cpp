@@ -1,4 +1,6 @@
 #include "material.h"
+
+#include <cuda_runtime_api.h>
 #include <stb_image.h>
 std::vector<Material> Materials;
 void CreateTextureFromFile(Texture& InOutTexture, std::string Filename)
@@ -45,15 +47,6 @@ void FreeTexture(Texture& InOutTexture)
     }
 }
 
-__device__ glm::vec3 GetColorDevice(const Texture::RenderProxy& InTexture, glm::vec2 uv)
-{
-	uv.y = 1.f - uv.y; // Flip V to match image coordinate system
-	glm::vec2 TexCoord = uv * glm::vec2(InTexture.Extent.x, InTexture.Extent.y);
-	int x = static_cast<int>(TexCoord.x) % InTexture.Extent.x;
-	int y = static_cast<int>(TexCoord.y) % InTexture.Extent.y;
-	return InTexture.Image_Device[x + y * InTexture.Extent.x];
-}
-
 TextureManager* TextureManager::Get()
 {
 	static TextureManager* Instance = new TextureManager();
@@ -71,7 +64,7 @@ TextureManager::~TextureManager()
     Textures.clear();
 }
 
-void TextureManager::LoadAllTexturesToDevice(std::vector<Material>& InOutMats)
+void TextureManager::LoadAllTexturesToDevice()
 {
     for (auto& name_tex : Textures)
     {
@@ -80,22 +73,14 @@ void TextureManager::LoadAllTexturesToDevice(std::vector<Material>& InOutMats)
         {
             continue;
         }
-        cudaMalloc(&tex.Image_Device, sizeof(glm::vec3) * tex.Extent.x * tex.Extent.y);
+        cudaMalloc((void**)&tex.Image_Device, sizeof(glm::vec3) * tex.Extent.x * tex.Extent.y);
         cudaMemcpy(tex.Image_Device, tex.Image_Host,
             sizeof(glm::vec3) * tex.Extent.x * tex.Extent.y, cudaMemcpyHostToDevice);
         tex.Proxy_Host = new Texture::RenderProxy();
 		tex.Proxy_Host->Extent = tex.Extent;
 		tex.Proxy_Host->Image_Device = tex.Image_Device;
-        cudaMalloc(&tex.Proxy_Device, sizeof(Texture::RenderProxy));
+        cudaMalloc((void**)&tex.Proxy_Device, sizeof(Texture::RenderProxy));
         cudaMemcpy(tex.Proxy_Device, tex.Proxy_Host, sizeof(Texture::RenderProxy), cudaMemcpyHostToDevice);
-    }
-    for (auto& Mat : InOutMats)
-    {
-	    Mat.BaseColorTextureProxy_Device = nullptr;
-        if (Mat.BaseColorTexture)
-        {
-            Mat.BaseColorTextureProxy_Device = Mat.BaseColorTexture->Proxy_Device;
-		}
     }
 }
 

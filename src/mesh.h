@@ -8,7 +8,12 @@
 #define GRID_SIZE 4681
 #define GRID_WIDTH 16
 #define GRID_LAYERS 4
-// 2^4==16, 8^0+8^1+8^2+8^3+8^4=4681
+
+namespace tinygltf
+{
+	class Model;
+	struct Mesh;
+}
 
 class StaticMesh
 {
@@ -58,6 +63,9 @@ class StaticMeshManager
 public:
 	static StaticMeshManager* Get();
 	StaticMesh* LoadObj(std::string MeshName, std::string FilePath);
+	StaticMesh* LoadGLTF(std::string MeshName, const tinygltf::Mesh& gltfMesh, const tinygltf::Model& model);
 	StaticMesh* GetMesh(std::string MeshName);
 	StaticMesh* CreateAndGetMesh(std::string MeshName);
+	void CreateRenderProxyForAll();
+	void CalculateOctreeStructureCUDA();
 };

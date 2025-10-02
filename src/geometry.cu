@@ -333,11 +333,11 @@ __host__ __device__ float triangleIntersectionTest(
 }
 
 __host__ __device__ float meshIntersectionTest(
-    Geom mesh, StaticMesh::RenderProxy* dev_staticMeshes,
+    Geom mesh, StaticMesh::RenderProxy* dev_staticMesh,
     Ray ray_World,
     ShadeableIntersection& OutIntersect)
 {
-	int totalObjectCount = dev_staticMeshes->VertexCount / 3;
+	int totalObjectCount = dev_staticMesh->VertexCount / 3;
     Ray ray_Local;
     ray_Local.origin = multiplyMV(mesh.inverseTransform, glm::vec4(ray_World.origin, 1.0f));
     ray_Local.direction = glm::normalize(multiplyMV(mesh.inverseTransform, glm::vec4(ray_World.direction, 0.0f)));
@@ -355,9 +355,9 @@ __host__ __device__ float meshIntersectionTest(
     {
 	    // test each triangle in the mesh
         t = triangleIntersectionTest(
-            dev_staticMeshes->raw.VertexPosition_Device[3 * i + 0],
-            dev_staticMeshes->raw.VertexPosition_Device[3 * i + 1],
-            dev_staticMeshes->raw.VertexPosition_Device[3 * i + 2],
+            dev_staticMesh->raw.VertexPosition_Device[3 * i + 0],
+            dev_staticMesh->raw.VertexPosition_Device[3 * i + 1],
+            dev_staticMesh->raw.VertexPosition_Device[3 * i + 2],
             ray_Local,
             Pos_Temp,
             Nor_Temp,
@@ -369,9 +369,9 @@ __host__ __device__ float meshIntersectionTest(
 	        t_min = glm::min(t, t_min);
             IntersectPos_Local = Pos_Temp;
             IntersectNor_Local = Nor_Temp;
-			uv1 = dev_staticMeshes->raw.VertexTexCoord_Device[3 * i + 0];
-            uv2 = dev_staticMeshes->raw.VertexTexCoord_Device[3 * i + 1];
-			uv3 = dev_staticMeshes->raw.VertexTexCoord_Device[3 * i + 2];
+			uv1 = dev_staticMesh->raw.VertexTexCoord_Device[3 * i + 0];
+            uv2 = dev_staticMesh->raw.VertexTexCoord_Device[3 * i + 1];
+			uv3 = dev_staticMesh->raw.VertexTexCoord_Device[3 * i + 2];
         }
     }
     if (t_min==FLT_MAX)
@@ -548,7 +548,7 @@ __device__ float IntersectBoundingBoxLayer(
 
 __device__ float meshIntersectionTest_Optimized(
     glm::vec3& debug,
-    Geom mesh, StaticMesh::RenderProxy* dev_staticMeshes,
+    Geom mesh, StaticMesh::RenderProxy* dev_staticMesh,
     Ray ray_World,
     ShadeableIntersection& OutIntersection)
 {
@@ -563,7 +563,7 @@ __device__ float meshIntersectionTest_Optimized(
             ray_World,
             TempIntersect,
             curLayer,
-            dev_staticMeshes
+            dev_staticMesh
         );
         if (t > 0.f && t < t_min)
         {

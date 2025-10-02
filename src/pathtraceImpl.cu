@@ -9,48 +9,10 @@
 #include "utilities.h"
 #include "mesh.h"
 #include "material.h"
+#include "renderproxy.h"
+#include "scene.h"
 
 #define USE_MESH_GRID_ACCELERATION 1
-
-__device__ int GetTriangleBound(glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, int layer) // p1 p2 p3 within [0,1]
-{
-	int bound = -1;
-    while (layer < GRID_LAYERS - 1)
-    {
-        int boundP1 = GetPointBoundNextLayer(p1);
-        int boundP2 = GetPointBoundNextLayer(p2);
-        int boundP3 = GetPointBoundNextLayer(p3);
-        if (boundP1 != boundP2 || boundP1 != boundP3)
-        {
-            break;
-		}
-        bound = 8*(bound+1) + boundP1;
-        p1 = glm::fract(p1 * 2.f);
-        p2 = glm::fract(p2 * 2.f);
-        p3 = glm::fract(p3 * 2.f);
-		layer++;
-    }
-    return bound;
-}
-
-__global__ void calculateMeshGridSpeedup(StaticMesh::RenderProxy* InMeshData)
-{
-	int triangleId = (blockIdx.x * blockDim.x) + threadIdx.x;
-    if (triangleId >= InMeshData->VertexCount / 3)
-    {
-        return;
-	}
-    glm::vec3 p1 = InMeshData->raw.VertexPosition_Device[triangleId * 3 + 0];
-    glm::vec3 p2 = InMeshData->raw.VertexPosition_Device[triangleId * 3 + 1];
-    glm::vec3 p3 = InMeshData->raw.VertexPosition_Device[triangleId * 3 + 2];
-	glm::vec3 boxMin = InMeshData->boxMin;
-	glm::vec3 boxMax = InMeshData->boxMax;
-	p1 = (p1 - boxMin) / (boxMax - boxMin);
-	p2 = (p2 - boxMin) / (boxMax - boxMin);
-    p3 = (p3 - boxMin) / (boxMax - boxMin);
-    int bound = GetTriangleBound(p1, p2, p3, 0);
-	InMeshData->raw.TriangleToGridIndices_Device[triangleId] = bound;
-}
 
 /**
 * Generate PathSegments with rays from the camera through the screen into the
@@ -96,8 +58,7 @@ __device__ float getIntersectionGeometryIndex(
     ShadeableIntersection& OutIntersect,
     Ray& InRayWorld,
     int geoms_size,
-	Geom* geoms, 
-    StaticMesh::RenderProxy* dev_staticMeshes
+	Geom* geoms
 )
 {
     float t = -1.0f;
@@ -122,12 +83,12 @@ __device__ float getIntersectionGeometryIndex(
     	else if (geom.type == PLANE)
         {
             t = planeIntersectionTest(geom, InRayWorld, TempIntersect);
-        }else if (geom.type==MESH && dev_staticMeshes!=nullptr)
+        }else if (geom.type==MESH && geom.MeshProxy_Device!=nullptr)
         {
 #if USE_MESH_GRID_ACCELERATION
-			t = meshIntersectionTest_Optimized(debug, geom, dev_staticMeshes, InRayWorld, TempIntersect);
+			t = meshIntersectionTest_Optimized(debug, geom, geom.MeshProxy_Device, InRayWorld, TempIntersect);
 #else
-            t = meshIntersectionTest(geom, dev_staticMeshes, InRayWorld, OutIntersect);
+            t = meshIntersectionTest(geom, geom.MeshProxy_Device, InRayWorld, OutIntersect);
 #endif
         }
         // Compute the minimum t from the intersection tests to determine what
@@ -146,10 +107,9 @@ __global__ void computeIntersections(
     int depth,
     int num_paths,
     PathSegment* pathSegments,
-    Geom* geoms,
-    int geoms_size,
+    Scene::RenderProxy* scene,
     ShadeableIntersection* intersections,
-    int* device_materialIds, int* dev_pathAlive, StaticMesh::RenderProxy* dev_staticMeshes)
+    int* device_materialIds, int* dev_pathAlive)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 	int path_index = dev_pathAlive[tid];
@@ -170,7 +130,7 @@ __global__ void computeIntersections(
     glm::vec3 debug;
     getIntersectionGeometryIndex(debug,
         hit_geom_index, Intersect,
-        pathSegment.ray, geoms_size, geoms, dev_staticMeshes);
+        pathSegment.ray, scene->geoms_size, scene->geoms_Device);
 
     if (hit_geom_index == -1)
     {
@@ -181,7 +141,7 @@ __global__ void computeIntersections(
     else
     {
         // The ray hits something
-        int matId = geoms[hit_geom_index].materialid;
+        int matId = scene->geoms_Device[hit_geom_index].materialid;
         device_materialIds[path_index] = matId;
         Intersect.materialId = matId;
         pathSegment.debug = glm::vec3(Intersect.uv.x, Intersect.uv.y, 0.f);
@@ -288,7 +248,6 @@ __device__ bool sampleLightFromIntersections(
     Geom& light_geom,
     int geomSize,
 	Geom* geoms,
-    StaticMesh::RenderProxy* mesh,
     thrust::default_random_engine& rng
 )
 {
@@ -309,14 +268,14 @@ __device__ bool sampleLightFromIntersections(
 	getIntersectionGeometryIndex(debug, 
 		hit_geom_index,
         _,
-        wj, geomSize, geoms, mesh);
+        wj, geomSize, geoms);
     outDirectLight += light_mat.emittance;
     return dotProduct > 0.0001f && hit_geom_index == 0;//&& glm::length(tmp_intersect - lightPosition) < 0.001f;
 }
 
 __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContribution, 
     glm::vec3 In_p, glm::vec3 InViewDir, glm::vec3 InSurfaceNormal, Material& InSurfaceMat, 
-    Geom& InLightGeom, Material& InLightMat, int GeomSize, Geom* Geoms, StaticMesh::RenderProxy* mesh,
+    Geom& InLightGeom, Material& InLightMat, int GeomSize, Geom* Geoms, 
     thrust::default_random_engine& rng)
 {
     glm::vec3 directLight;
@@ -325,7 +284,7 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
     glm::vec2 uv;
     float pdf_bsdf;
     Ray wj;
-    bool sampledDirectLight = sampleLightFromIntersections(debug, directLight, pdf_Ld, wj, In_p, InLightMat, InLightGeom, GeomSize, Geoms, mesh, rng);
+    bool sampledDirectLight = sampleLightFromIntersections(debug, directLight, pdf_Ld, wj, In_p, InLightMat, InLightGeom, GeomSize, Geoms, rng);
     if (sampledDirectLight)
     {
         //bsdfDiffuse(bsdf, pdf_bsdf, wj, InSurfaceNormal, &InSurfaceMat);
@@ -342,7 +301,7 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
     //bsdfDiffuseSample(bsdf, pdf_bsdf, wj, In_p, InSurfaceNormal, &InSurfaceMat, rng);
     int hit_index = -1;
     ShadeableIntersection _;
-    getIntersectionGeometryIndex(debug,hit_index, _, wj, GeomSize, Geoms, mesh);
+    getIntersectionGeometryIndex(debug,hit_index, _, wj, GeomSize, Geoms);
     if (hit_index != 0)
     {
        OutContribution = glm::vec3(0.f);
@@ -356,7 +315,8 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
 
 __global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
     PathSegment* pathSegments, ShadeableIntersection* dev_intersections,
-    Material* inMaterial, int geomSize, Geom* geoms, Geom* light_geoms, int* dev_pathAlive, StaticMesh::RenderProxy* mesh)
+    Scene::RenderProxy* scene,
+    int* dev_pathAlive)
 {
     int tid = (blockIdx.x * blockDim.x) + threadIdx.x;
     int pathIndex = dev_pathAlive[tid];
@@ -370,14 +330,14 @@ __global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
     }
     PathSegment path_segment = pathSegments[pathIndex];
     ShadeableIntersection intersection = dev_intersections[pathIndex];
-	Material light_mat = inMaterial[light_geoms[0].materialid];
-	Geom light_geom = light_geoms[0];
+    Geom light_geom = scene->geoms_Device[scene->light_index_Device[0]];
+	Material light_mat = scene->materials_Device[light_geom.materialid];
     if (intersection.materialId < 0) {
         path_segment.remainingBounces = 0;
         pathSegments[pathIndex] = path_segment;
         return;
     }
-    Material material = inMaterial[intersection.materialId];
+    Material material = scene->materials_Device[intersection.materialId];
 	glm::vec3 p = intersection.intersectPoint + EPSILON * intersection.surfaceNormal;
     thrust::default_random_engine rng = makeSeededRandomEngine(frame, pathIndex, iter * path_segment.remainingBounces);
     if (material.emittance > 0.)
@@ -391,7 +351,7 @@ __global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
     glm::vec3 debug;
 	glm::vec3 ViewDir = -path_segment.ray.direction;
     SampleDirectLightMIS(debug, contrib, p, ViewDir, intersection.surfaceNormal, material,
-        light_geom, light_mat, geomSize, geoms, mesh, rng);
+        light_geom, light_mat, scene->geoms_size, scene->geoms_Device, rng);
 	path_segment.Contribution += path_segment.BSDF * contrib / path_segment.PDF * path_segment.Cosine;
     Ray wi;
     glm::vec3 bsdf_at_p;
