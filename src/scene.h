@@ -15,6 +15,7 @@ public:
     void ReadGLTF(std::string filename);
     void CreateRenderProxyForAll();
     void DestroySceneRenderProxy();
+    void CenterCamera();
     std::vector<Geom> geoms;
     std::vector<int> lights;
     std::vector<Material> materials;

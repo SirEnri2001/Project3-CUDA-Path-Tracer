@@ -50,6 +50,16 @@ struct Camera
     glm::vec3 right;
     glm::vec2 fov;
     glm::vec2 pixelLength;
+    float radius;
+    glm::vec3 resetLookAt;
+    void Reset()
+    {
+        lookAt = resetLookAt;
+        position = resetLookAt + glm::vec3(0, 0, radius * 2.5f);
+        view = glm::normalize(lookAt - position);
+        right = glm::normalize(glm::cross(view, up));
+        up = glm::cross(right, view);
+    }
 };
 
 struct RenderState

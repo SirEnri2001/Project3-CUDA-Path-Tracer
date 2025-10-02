@@ -93,6 +93,7 @@ void pathtraceCreate(Scene* scene)
 	checkCUDAError("pathtraceInit");
 
 	scene->CreateRenderProxyForAll();
+	scene->CenterCamera();
 	size_t stack_size = 8192; // 8KB
 	cudaDeviceSetLimit(cudaLimitStackSize, stack_size);
 }
@@ -169,6 +170,7 @@ void pathtrace(Scene* scene, uchar4* pbo, int frame, int iter)
 	int num_paths = pixelcount;
 	// --- PathSegment Tracing Stage ---
 	// Shoot ray into scene, bounce between objects, push shading chunks
+	std::cout << "Camera Pos" << cam.position.x << " " << cam.position.y << " " << cam.position.z << std::endl;
 	std::cout << "New Frame" << std::endl;
 	for (int i = 0; i < iter; i++)
 	{

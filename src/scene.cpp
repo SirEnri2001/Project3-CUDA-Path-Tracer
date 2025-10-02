@@ -40,7 +40,7 @@ Scene::Scene()
 
     //calculate fov based on resolution
     float yscaled = tan(fovy * (PI / 180));
-    float xscaled = (yscaled * camera.resolution.x) / camera.resolution.y;
+    float xscaled = yscaled * camera.resolution.x / camera.resolution.y;
     float fovx = (atan(xscaled) * 180) / PI;
     camera.fov = glm::vec2(fovx, fovy);
 
@@ -55,6 +55,41 @@ Scene::Scene()
     state.image.resize(arraylen);
     std::fill(state.image.begin(), state.image.end(), glm::vec3());
 }
+
+void Scene::CenterCamera()
+{
+	if (geoms.size()==0)
+	{
+        return;
+	}
+    glm::vec3 boxMin(FLT_MAX);
+    glm::vec3 boxMax(-FLT_MAX);
+    for (const auto& g : geoms)
+    {
+        if (g.type == MESH && g.Mesh_Host)
+        {
+            boxMin = glm::min(boxMin, glm::vec3(g.transform * glm::vec4(g.Mesh_Host->Data.boxMin, 1.0f)));
+            boxMax = glm::max(boxMax, glm::vec3(g.transform * glm::vec4(g.Mesh_Host->Data.boxMax, 1.0f)));
+        }
+        else
+        {
+            //other primitive types
+            //assume they are unit size centered at origin before transform
+            boxMin = glm::min(boxMin, glm::vec3(-0.5f));
+            boxMax = glm::max(boxMax, glm::vec3(0.5f));
+        }
+    }
+    glm::vec3 center = (boxMin + boxMax) * 0.5f;
+    Camera& camera = state.camera;
+    camera.resetLookAt = center;
+    camera.radius = glm::length(boxMax - boxMin) * 0.5f;
+    camera.lookAt = center;
+    camera.view = glm::vec3(0.f,-1.f,0.f);
+	camera.position = -camera.view * 3.0f * camera.radius + camera.lookAt; // 3.0 is default zoom factor
+    camera.right = glm::normalize(glm::cross(camera.view, camera.up));
+	camera.up = glm::normalize(glm::cross(camera.right, camera.view));
+}
+
 
 void Scene::DestroySceneRenderProxy()
 {
@@ -233,7 +268,29 @@ void LoadGeomFromModelNodes(
                 sn.LocalTransfrom[d / 4][d % 4] = n.matrix[d];
             }
         }
-		
+        else
+        {
+            glm::vec3 translation(0.0f);
+            if (n.translation.size() == 3)
+            {
+                translation = glm::vec3(n.translation[0], n.translation[1], n.translation[2]);
+            }
+            glm::vec3 rotation(0.0f);
+            if (n.rotation.size() == 4)
+            {
+                // Convert quaternion to Euler angles
+                glm::quat q(n.rotation[3], n.rotation[0], n.rotation[1], n.rotation[2]);
+                rotation = glm::eulerAngles(q);
+                rotation = glm::degrees(rotation);
+            }
+            glm::vec3 scale(1.0f);
+            if (n.scale.size() == 3)
+            {
+                scale = glm::vec3(n.scale[0], n.scale[1], n.scale[2]);
+            }
+			sn.LocalTransfrom = utilityCore::buildTransformationMatrix(translation, rotation, scale);
+        }
+
         for (auto& child : n.children)
         {
 			sceneNodes[child].parent = &sn;
