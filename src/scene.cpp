@@ -87,11 +87,29 @@ void Scene::CreateDefaultLight()
 
     Material Mat;
     Mat.color = glm::vec3(0.9f, 0.8f, 0.7f);
-    Mat.emittance = 10.f;
+    Mat.emittance = 3.f;
     Mat.isLight = true;
     materials.push_back(Mat);
     geoms.push_back(LightGeom);
     lights.push_back(geoms.size() - 1);
+}
+
+void Scene::CreateDefaultFloor()
+{
+    Material Mat;
+    Mat.color = glm::vec3(0.9f, 0.8f, 0.7f);
+    Mat.emittance = 0.f;
+    Mat.isLight = false;
+    materials.push_back(Mat);
+    Geom Floor;
+    Floor.type = PLANE;
+    Floor.scale = glm::vec3(boxMax.x - boxMin.x, 1.f, boxMax.z - boxMin.z) * 8.f;
+    Floor.translation = (boxMax + boxMin) * 0.5f - 0.5f * glm::vec3(0.f, boxMax.y - boxMin.y, 0.f);
+    Floor.transform = utilityCore::buildTransformationMatrix(Floor.translation, glm::vec3(0.f), Floor.scale);
+    Floor.inverseTransform = glm::inverse(Floor.transform);
+    Floor.invTranspose = glm::transpose(Floor.inverseTransform);
+    Floor.materialid = materials.size() - 1; // last one
+    geoms.push_back(Floor);
 }
 
 
@@ -131,6 +149,8 @@ void Scene::ReadJSON(const std::string& jsonName)
         {
             const auto& col = p["RGB"];
             newMaterial.color = glm::vec3(col[0], col[1], col[2]);
+            newMaterial.roughness = 1.0f;
+            newMaterial.metallicness = 0.f;
         }
         else if (p["TYPE"] == "Emitting")
         {
@@ -143,13 +163,15 @@ void Scene::ReadJSON(const std::string& jsonName)
         {
             const auto& col = p["RGB"];
             newMaterial.color = glm::vec3(col[0], col[1], col[2]);
-            newMaterial.roughness = p["ROUGHNESS"];
+            newMaterial.roughness = 0.f;
+            newMaterial.metallicness = 1.f;
         }
         else if (p["TYPE"] == "DefaultLit")
         {
             const auto& col = p["RGB"];
             newMaterial.color = glm::vec3(col[0], col[1], col[2]);
             newMaterial.roughness = p["ROUGHNESS"];
+            newMaterial.metallicness = p["SPECULAR"];
             if (p.contains("TEX"))
             {
 				const auto& col = p["TEX"]["BASECOLOR"];
@@ -369,15 +391,20 @@ void Scene::ReadGLTF(std::string filename)
         Material mat;
         mat.color = glm::vec3(baseColorFactor[0], baseColorFactor[1], baseColorFactor[2]);
         mat.roughness = roughnessFactor;
+        mat.metallicness = metallicFactor;
 
         if (pbr.baseColorTexture.index >= 0) {
             mat.BaseColorTexture = TextureManager::Get()->GetByTextureName(model.textures[pbr.baseColorTexture.index].name);
         }
-
+        if (pbr.metallicRoughnessTexture.index>=0)
+        {
+	        mat.MetallicnessTexture = TextureManager::Get()->GetByTextureName(model.textures[pbr.metallicRoughnessTexture.index].name);
+        }
         if (material.normalTexture.index >= 0) {
 
         }
         if (material.emissiveTexture.index >= 0) {
+            mat.EmittanceTexture = TextureManager::Get()->GetByTextureName(model.textures[material.emissiveTexture.index].name);
             mat.isLight = true;
             mat.emittance = 1.0f;
 		}
@@ -432,6 +459,14 @@ void Scene::CreateRenderProxyForAll()
         if (Mat.BaseColorTexture)
         {
             Mat.BaseColorTextureProxy_Device = Mat.BaseColorTexture->Proxy_Device;
+        }
+        if (Mat.MetallicnessTexture)
+        {
+            Mat.MetallicnessTextureProxy_Device = Mat.MetallicnessTexture->Proxy_Device;
+        }
+        if (Mat.EmittanceTexture)
+        {
+            Mat.EmittanceTextureProxy_Device = Mat.EmittanceTexture->Proxy_Device;
         }
     }
 

@@ -15,7 +15,9 @@ struct Material;
 __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     glm::vec3 normal, 
     thrust::default_random_engine& rng);
-
+__host__ __device__ glm::vec3 sampleHemisphere(
+    glm::vec3 normal,
+    thrust::default_random_engine& rng);
 /**
  * Scatter a ray with some probabilities according to the material properties.
  * For example, a diffuse surface scatters in a cosine-weighted hemisphere.

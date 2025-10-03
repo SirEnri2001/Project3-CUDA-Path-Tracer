@@ -10,11 +10,11 @@ using namespace glm;
 // code below is from https://github.com/wdas/brdf/blob/main/src/brdfs/disney.brdf
 
 __host__ __device__
-float SchlickFresnel(float u)
+vec3 SchlickFresnel(float thetaO, vec3 R, float rough)
 {
-    float m = clamp(1.f - u, 0.f, 1.f);
+    float m = clamp(1.f - thetaO, 0.f, 1.f);
     float m2 = m * m;
-    return m2 * m2 * m; // pow(m,5)
+    return R + (1.f - R)*m2 * m2 * m; // pow(m,5)
 }
 
 __host__ __device__
@@ -33,7 +33,7 @@ __host__ __device__
 float GTR2(float NdotH, float a)
 {
     float a2 = a * a;
-    float t = 1 + (a2 - 1) * NdotH * NdotH;
+    float t = 1.f + (a2 - 1.f) * NdotH * NdotH;
     return a2 / (PI * t * t);
 }
 
@@ -52,6 +52,37 @@ float smithG_GGX(float NdotV, float alphaG)
 }
 
 __host__ __device__
+float schlick_G (float cos_w, float a)
+{
+    float k = a / 8.f;
+    return cos_w / (cos_w * (1.f - k) + k);
+}
+
+__host__ __device__
+float D_GGX(float a2, float NoH)
+{
+    float d = (NoH * a2 - NoH) * NoH + 1; // 2 mad
+    return a2 / (PI * d * d);         // 4 mul, 1 rcp
+}
+
+
+__host__ __device__
+void ImportanceSampleGGX_TangentSpace(vec3& OutH, float& pdf, vec2 E, float a2)
+{
+    float Phi = 2 * PI * E.x;
+    float CosTheta = sqrt((1.f - E.y) / (1.f + (a2 - 1) * E.y));
+    float SinTheta = sqrt(1.f - CosTheta * CosTheta);
+
+    OutH.x = SinTheta * cos(Phi);
+    OutH.y = CosTheta;
+    OutH.z = SinTheta * sin(Phi);
+
+    float d = (CosTheta * a2 - CosTheta) * CosTheta + 1.f;
+    float D = a2 / (PI * d * d);
+    pdf = D * CosTheta;
+}
+
+__host__ __device__
 float smithG_GGX_aniso(float NdotV, float VdotX, float VdotY, float ax, float ay)
 {
     return 1 / (NdotV + sqrt(sqr(VdotX * ax) + sqr(VdotY * ay) + sqr(NdotV)));
@@ -63,57 +94,58 @@ vec3 mon2lin(vec3 x)
     return vec3(pow(x[0], 2.2), pow(x[1], 2.2), pow(x[2], 2.2));
 }
 
+__host__ __device__ float Cos2Theta(vec3 w) { return sqr(w.z); }
+__host__ __device__ float Sin2Theta(vec3 w) { return glm::max(0.f, 1.f - Cos2Theta(w)); }
+__host__ __device__ float SinTheta(vec3 w) { return std::sqrt(Sin2Theta(w)); }
+__host__ __device__ float CosTheta(vec3 w) { return std::sqrt(Cos2Theta(w)); }
+__host__ __device__ float TanTheta(vec3 w) { return SinTheta(w) / CosTheta(w); }
+__host__ __device__ float Tan2Theta(vec3 w) { return Sin2Theta(w) / Cos2Theta(w); }
+__host__ __device__ float CosPhi(vec3 w) {
+    float sinTheta = SinTheta(w);
+    return (sinTheta == 0) ? 1 : glm::clamp(w.x / sinTheta, -1.f, 1.f);
+}
+__host__ __device__ float AbsCosTheta(vec3 w) { return glm::abs(CosTheta(w)); }
 __host__ __device__
-vec3 BRDF(BRDF_Params Params, vec3 L, vec3 V, vec3 N, vec3 X, vec3 Y)
-{
-    float NdotL = dot(N, L);
-    float NdotV = dot(N, V);
-    if (NdotL < 0 || NdotV < 0) return vec3(0);
+float SinPhi(vec3 w) {
+    float sinTheta = SinTheta(w);
+    return (sinTheta == 0) ? 0 : glm::clamp(w.y / sinTheta, -1.f, 1.f);
+}
+//__host__ __device__
+//float D(vec3 wm) {
+//    float tan2Theta = Tan2Theta(wm);
+//    if (cuda::std::isinf(tan2Theta)) return 0;
+//    float cos4Theta = sqr(Cos2Theta(wm));
+//    float e = tan2Theta * (sqr(CosPhi(wm) / alpha_x) +
+//        sqr(SinPhi(wm) / alpha_y));
+//    return 1 / (Pi * alpha_x * alpha_y * cos4Theta * sqr(1 + e));
+//}
 
+//__host__ __device__
+//float3 F_Schlick(float HdotV, vec3 F0)
+//{
+//    return F0 + (1.f - F0) * pow(1 - HdotV, 5.0f);
+//}
+
+__host__ __device__
+vec3 BRDF(BRDF_Params Params, vec3 L, vec3 V, vec3 N)
+{
     vec3 H = normalize(L + V);
     float NdotH = dot(N, H);
-    float LdotH = dot(L, H);
-
-    vec3 Cdlin = mon2lin(Params.baseColor);
-    float Cdlum = .3f * Cdlin[0] + .6f * Cdlin[1] + .1f * Cdlin[2]; // luminance approx.
-
-    vec3 Ctint = Cdlum > 0 ? Cdlin / Cdlum : vec3(1); // normalize lum. to isolate hue+sat
-    vec3 Cspec0 = mix(Params.specular * .08f * mix(vec3(1), Ctint, Params.specularTint), Cdlin, Params.metallic);
-    vec3 Csheen = mix(vec3(1), Ctint, Params.sheenTint);
+    float NdotV = dot(N, V);
+    float NdotL = dot(N, L);
+    float HdotV = dot(H, V);
+    float a = Params.roughness * Params.roughness;
+    float D = D_GGX(a*a, NdotH);
 
     // Diffuse fresnel - go from 1 at normal incidence to .5 at grazing
     // and mix in diffuse retro-reflection based on roughness
-    float FL = SchlickFresnel(NdotL), FV = SchlickFresnel(NdotV);
-    float Fd90 = 0.5f + 2 * LdotH * LdotH * Params.roughness;
-    float Fd = mix(1.0f, Fd90, FL) * mix(1.0f, Fd90, FV);
-
-    // Based on Hanrahan-Krueger brdf approximation of isotropic bssrdf
-    // 1.25 scale is used to (roughly) preserve albedo
-    // Fss90 used to "flatten" retroreflection based on roughness
-    float Fss90 = LdotH * LdotH * Params.roughness;
-    float Fss = mix(1.0f, Fss90, FL) * mix(1.0f, Fss90, FV);
-    float ss = 1.25f * (Fss * (1 / (NdotL + NdotV) - .5f) + .5f);
-
-    // specular
-    float aspect = sqrt(1 - Params.anisotropic * .9);
-    float ax = max(.001f, sqr(Params.roughness) / aspect);
-    float ay = max(.001f, sqr(Params.roughness) * aspect);
-    float Ds = GTR2_aniso(NdotH, dot(H, X), dot(H, Y), ax, ay);
-    float FH = SchlickFresnel(LdotH);
-    vec3 Fs = mix(Cspec0, vec3(1), FH);
-    float Gs;
-    Gs = smithG_GGX_aniso(NdotL, dot(L, X), dot(L, Y), ax, ay);
-    Gs *= smithG_GGX_aniso(NdotV, dot(V, X), dot(V, Y), ax, ay);
-
-    // sheen
-    vec3 Fsheen = FH * Params.sheen * Csheen;
-
-    // clearcoat (ior = 1.5 -> F0 = 0.04)
-    float Dr = GTR1(NdotH, mix(.1f, .001f, Params.clearcoatGloss));
-    float Fr = mix(.04f, 1.0f, FH);
-    float Gr = smithG_GGX(NdotL, .25f) * smithG_GGX(NdotV, .25f);
-
-    return ((1 / PI) * mix(Fd, ss, Params.subsurface) * Cdlin + Fsheen)
-        * (1 - Params.metallic)
-        + Gs * Fs * Ds + .25f * Params.clearcoat * Gr * Fr * Dr;
+    float Gs = schlick_G(NdotV, a) * schlick_G(NdotL, a);
+    vec3 F0 = mix(vec3(0.04f), Params.baseColor, Params.metallic);
+    vec3 Fs = SchlickFresnel(max(HdotV, 0.0f), F0, Params.roughness);
+    vec3 f_CookTorrance = D * Fs * Gs / NdotV / NdotL / 4.f;
+    vec3 ks = Fs;
+    vec3 kd = vec3(1.0f) - ks;
+    kd *= (1.f - Params.metallic);
+	vec3 f_lambert = Params.baseColor * INV_PI;
+    return kd * f_lambert + f_CookTorrance;
 }

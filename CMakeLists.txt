@@ -66,6 +66,7 @@ set(headers
     src/MeshLoader/tiny_gltf.h
     src/material.h
     src/renderproxy.h
+    src/defs.h
 )
 
 set(sources

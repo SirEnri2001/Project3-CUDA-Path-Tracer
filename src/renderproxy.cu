@@ -138,27 +138,29 @@ __global__ void calculateGridStartEndIndices(int triangleSize, int* InSortedGrid
 
 __host__ void OutputDebug(StaticMesh::RenderProxy* Proxy_Host)
 {
-    int* indices = new int[GRID_SIZE];
-    cudaMemcpy(indices,Proxy_Host->raw.GridIndicesStart_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
+    int* indicesStart = new int[GRID_SIZE];
+    int* indicesEnd = new int[GRID_SIZE];
+    int emptyGrids = 0;
+    int usedGrids = 0;
+    int maxObjects = 0;
+    int totalObjects = 0;
+
+    cudaMemcpy(indicesStart,Proxy_Host->raw.GridIndicesStart_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(indicesEnd, Proxy_Host->raw.GridIndicesEnd_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
     for (int i = 0; i < GRID_SIZE; i++)
     {
-        std::cout << indices[i] << ", ";
-        if (i % 20 == 0)
+        if (indicesStart[i]==-1)
         {
-            std::cout << std::endl;
+            emptyGrids++;
+            continue;
         }
+        usedGrids++;
+        maxObjects = glm::max(maxObjects, indicesEnd[i] - indicesStart[i]);
+        totalObjects += indicesEnd[i] - indicesStart[i];
     }
-    std::cout << "============" << std::endl;
-    cudaMemcpy(indices, Proxy_Host->raw.GridIndicesEnd_Device, sizeof(int) * GRID_SIZE, cudaMemcpyDeviceToHost);
-    for (int i = 0; i < GRID_SIZE; i++)
-    {
-        std::cout << indices[i] << ", ";
-        if (i % 20 == 0)
-        {
-            std::cout << std::endl;
-        }
-    }
-    delete[] indices;
+    std::cout << "====<<< Used Grid: " << usedGrids << " Empty Grid: " << emptyGrids << " Max Objects: " << maxObjects << " Object / Grid: " << (float)totalObjects / usedGrids << " >>>===" << std::endl;
+    delete[] indicesStart;
+    delete[] indicesEnd;
 }
 
 __host__ void CalculateSpeedUpOctreeForStaticMesh(StaticMesh* Mesh)

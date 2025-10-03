@@ -23,7 +23,12 @@ struct Material
 	Texture* BaseColorTexture = nullptr;
 	Texture::RenderProxy* BaseColorTextureProxy_Device = nullptr;
     float roughness = 0.f;
+    float metallicness = 0.f;
+    Texture* MetallicnessTexture = nullptr;
+    Texture::RenderProxy* MetallicnessTextureProxy_Device = nullptr;
     float emittance = 0.f;
+    Texture* EmittanceTexture = nullptr;
+    Texture::RenderProxy* EmittanceTextureProxy_Device = nullptr;
     bool isLight = false;
 };
 

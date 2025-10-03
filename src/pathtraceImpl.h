@@ -12,7 +12,7 @@ __global__ void computeIntersections(
     PathSegment* pathSegments,
 	Scene::RenderProxy* scene,
     ShadeableIntersection* intersections,
-    int* device_materialIds, int* dev_pathAlive);
+    int* device_materialIds, int* dev_pathAlive, bool preCompute);
 __global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
     PathSegment* pathSegments, ShadeableIntersection* dev_intersections,
     Scene::RenderProxy* scene,

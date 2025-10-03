@@ -19,6 +19,7 @@ public:
     void DestroySceneRenderProxy();
     void CenterCamera();
     void CreateDefaultLight();
+    void CreateDefaultFloor();
     std::vector<Geom> geoms;
     std::vector<int> lights;
     std::vector<Material> materials;

@@ -10,6 +10,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/remove.h>
 
+#include "defs.h"
 #include "bsdf.h"
 #include "sceneStructs.h"
 #include "scene.h"
@@ -21,8 +22,6 @@
 #include "pathtraceImpl.h"
 #include "mesh.h"
 #include "material.h"
-
-#define SORT_RAYS 1
 
 //Kernel that writes the image to the OpenGL PBO directly.
 __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image)
@@ -52,7 +51,7 @@ static GuiDataContainer* guiData = NULL;
 static glm::vec3* dev_image = NULL;
 static PathSegment* dev_paths = NULL;
 static ShadeableIntersection* dev_path_intersections = NULL;
-static int* device_path_matIds = nullptr;
+static int* dev_geom_ids = nullptr;
 static int* device_pathAlive = nullptr;
 
 void InitDataContainer(GuiDataContainer* imGuiData)
@@ -64,9 +63,10 @@ void pathtraceNewFrame(Scene* scene)
 {
 	const Camera& cam = scene->state.camera;
 	const int pixelcount = cam.resolution.x * cam.resolution.y;
+	cudaDeviceSynchronize();
 	cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
 	cudaMemset(dev_path_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
-	cudaMemset(device_path_matIds, -1, pixelcount * sizeof(int));
+	cudaMemset(dev_geom_ids, -1, pixelcount * sizeof(int));
 	cudaMemset(device_pathAlive, -1, pixelcount * sizeof(int));
 }
 
@@ -85,8 +85,8 @@ void pathtraceCreate(Scene* scene)
 	cudaMalloc(&dev_path_intersections, pixelcount * sizeof(ShadeableIntersection));
 	cudaMemset(dev_path_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 	// allocate device memory for materialIds
-	cudaMalloc(&device_path_matIds, pixelcount * sizeof(int));
-	cudaMemset(device_path_matIds, -1, pixelcount * sizeof(int));
+	cudaMalloc(&dev_geom_ids, pixelcount * sizeof(int));
+	cudaMemset(dev_geom_ids, -1, pixelcount * sizeof(int));
 
 	cudaMalloc(&device_pathAlive, pixelcount * sizeof(int));
 	cudaMemset(device_pathAlive, -1, pixelcount * sizeof(int));
@@ -94,8 +94,6 @@ void pathtraceCreate(Scene* scene)
 
 	scene->CreateRenderProxyForAll();
 	scene->CenterCamera();
-	size_t stack_size = 8192; // 8KB
-	cudaDeviceSetLimit(cudaLimitStackSize, stack_size);
 }
 
 
@@ -147,9 +145,18 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
  * of memory management
  */
 
+struct Pred {
+	template<typename Tuple>
+	__host__ __device__
+	bool operator()(Tuple x)
+	{
+		return thrust::get<0>(x) == -1;
+	}
+};
+
 void pathtrace(Scene* scene, uchar4* pbo, int frame, int iter)
 {
-	const int traceDepth = 10; // = hst_scene->state.traceDepth;
+	const int traceDepth = scene->state.traceDepth;
 	const Camera& cam = scene->state.camera;
 	const int pixelcount = cam.resolution.x * cam.resolution.y;
 
@@ -160,22 +167,21 @@ void pathtrace(Scene* scene, uchar4* pbo, int frame, int iter)
 		(cam.resolution.y + blockSize2d.y - 1) / blockSize2d.y);
 
 	// 1D block for path tracing
-	const int blockSize1d = 128;
+	const int blockSize1d = 64;
 	generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(cam, frame, iter, dev_paths, device_pathAlive);
 	checkCUDAError("generate camera ray");
-	int depth = 0;
-	PathSegment* dev_path_end = dev_paths + pixelcount;
 	PathSegment* dev_path_begin = dev_paths;
 	int total_paths = pixelcount;
 	int num_paths = pixelcount;
 	// --- PathSegment Tracing Stage ---
 	// Shoot ray into scene, bounce between objects, push shading chunks
 	std::cout << "New Frame" << std::endl;
-	for (int i = 0; i < 1; i++)
+	for (int depth = 0; depth < traceDepth; depth++)
 	{
 		// clean shading chunks
 		cudaMemset(dev_path_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
+#if USE_SORT_BY_BOUNDING
 		dim3 numblocksPathSegmentTracing = (total_paths + blockSize1d - 1) / blockSize1d;
 		{
 			// tracing
@@ -185,38 +191,54 @@ void pathtrace(Scene* scene, uchar4* pbo, int frame, int iter)
 				dev_path_begin,
 				scene->Proxy_Device,
 				dev_path_intersections,
-				device_path_matIds, device_pathAlive
+				dev_geom_ids, device_pathAlive, true
 			);
+			cudaDeviceSynchronize();
 		}
 		{
-			//struct isPathAlive
-			//{
-			//	__host__ __device__
-			//	bool operator()(const int x)
-			//	{
-			//		return (x % 2) == 0;
-			//	}
-			//};
+			auto t = thrust::make_tuple(device_pathAlive, dev_geom_ids);
+			auto zip_iter = thrust::make_zip_iterator(thrust::make_tuple(device_pathAlive, dev_geom_ids));
+			auto end_iter = thrust::remove_if(thrust::device, zip_iter, zip_iter + num_paths, Pred());
+			num_paths = end_iter - zip_iter;
+			thrust::sort_by_key(
+				thrust::device,
+				dev_geom_ids,
+				dev_geom_ids + num_paths,
+				zip_iter);
+			computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
+				depth,
+				num_paths,
+				dev_path_begin,
+				scene->Proxy_Device,
+				dev_path_intersections,
+				dev_geom_ids, device_pathAlive, false
+			);
+
+			
+		}
+#else
+		dim3 numblocksPathSegmentTracing = (total_paths + blockSize1d - 1) / blockSize1d;
+		{
+			// tracing
+			computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
+				depth,
+				num_paths,
+				dev_path_begin,
+				scene->Proxy_Device,
+				dev_path_intersections,
+				dev_geom_ids, device_pathAlive, false
+				);
 			auto end_iter = thrust::remove(thrust::device, device_pathAlive, device_pathAlive + num_paths, -1);
 			num_paths = end_iter - device_pathAlive;
-//#if SORT_RAYS
-//TODO sorting rays by material id
-//			thrust::sort_by_key(
-//				thrust::device,
-//				device_path_matIds,
-//				device_path_matIds + num_paths,
-//				thrust::make_zip_iterator(
-//					thrust::make_tuple(dev_path_intersections, dev_paths, device_pathAlive)
-//				));
-//#endif
 		}
+#endif
+
 		std::cout << "number of paths: " << num_paths << std::endl;
 		numblocksPathSegmentTracing = (total_paths + blockSize1d - 1) / blockSize1d;
 		generateRayFromIntersections << <numblocksPathSegmentTracing, blockSize1d >> >(
 			iter, frame, num_paths, dev_path_begin,
 			dev_path_intersections,
 			scene->Proxy_Device, device_pathAlive);
-		depth++;
 		if (guiData != NULL)
 		{
 			guiData->TracedDepth = depth;
@@ -225,11 +247,12 @@ void pathtrace(Scene* scene, uchar4* pbo, int frame, int iter)
 
 	// Assemble this iteration and apply it to the image
 	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
-	finalGather<<<numBlocksPixels, blockSize1d>>>(total_paths, dev_image, dev_paths, guiData->isDebug);
-
-	// Send results to OpenGL buffer for rendering
-	sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(pbo, cam.resolution, iter, dev_image);
-
+	finalGather<<<numBlocksPixels, blockSize1d>>>(total_paths, dev_image, dev_paths, guiData?guiData->isDebug:false);
+	if (pbo)
+	{
+		// Send results to OpenGL buffer for rendering
+		sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_image);
+	}
 	// Retrieve image from GPU
 	cudaMemcpy(scene->state.image.data(), dev_image,
 	           pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);

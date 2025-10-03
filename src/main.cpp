@@ -24,6 +24,8 @@
 #include <sstream>
 #include <string>
 
+#include "defs.h"
+
 static std::string startTimeString;
 
 // For camera controls
@@ -35,7 +37,7 @@ static double lastY;
 
 static bool camchanged = true;
 
-float zoom = 3.0f, theta = 0.5f, phi = 0.5f;
+float zoom = 1.7f, theta = 1.0f, phi = 1.0f;
 
 Scene* scene;
 GuiDataContainer* guiData;
@@ -298,15 +300,14 @@ bool MouseOverImGuiWindow()
     return mouseOverImGuiWinow;
 }
 
-void mainLoop()
+void mainLoop(int loops = -1)
 {
     pathtraceCreate(scene);
+#if !COMMANDLET
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
-
         runCuda();
-
         std::string title = "CIS565 Path Tracer | " + utilityCore::convertIntToString(iteration) + " Iterations";
         glfwSetWindowTitle(window, title.c_str());
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
@@ -325,13 +326,22 @@ void mainLoop()
 
         glfwSwapBuffers(window);
     }
+#else
+    while (loops!=0)
+    {
+        loops--;
+        runCuda();
+    }
+#endif
 
+#if !COMMANDLET
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 
     glfwDestroyWindow(window);
     glfwTerminate();
+#endif
 }
 
 //-------------------------------
@@ -366,6 +376,7 @@ int main(int argc, char** argv)
     }
     scene->PostLoad();
     scene->CreateDefaultLight();
+    scene->CreateDefaultFloor();
     //Create Instance for ImGUIData
     guiData = new GuiDataContainer();
 
@@ -382,7 +393,6 @@ int main(int argc, char** argv)
     up = glm::cross(right, view);
 
     //cameraPosition = cam.position;
-    zoom = 3.0f;
     //// compute phi (horizontal) and theta (vertical) relative 3D axis
     //// so, (0 0 1) is forward, (0 1 0) is up
     //glm::vec3 viewXZ = glm::vec3(view.x, 0.0f, view.z);
@@ -393,12 +403,13 @@ int main(int argc, char** argv)
     //zoom = glm::length(cam.position - ogLookAt);
 
     // Initialize CUDA and GL components
+#if !COMMANDLET
     init();
 
     // Initialize ImGui Data
     InitImguiData(guiData);
     InitDataContainer(guiData);
-
+#endif
     // GLFW main loop
     mainLoop();
 
@@ -431,6 +442,7 @@ void saveImage()
     //img.saveHDR(filename);  // Save a Radiance HDR file
 }
 
+int frame = 0;
 void runCuda()
 {
     if (camchanged)
@@ -461,19 +473,24 @@ void runCuda()
         pathtraceNewFrame(scene);
     }
 
-    if (iteration < renderState->iterations)
+#if !COMMANDLET
+    if (iteration < 5000)
     {
         uchar4* pbo_dptr = NULL;
-        iteration++;
         cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
-
         // execute the kernel
-        int frame = 0;
-        pathtrace(scene, pbo_dptr, frame, iteration);
+        pathtrace(scene, pbo_dptr, frame++, iteration++);
 
         // unmap buffer object
         cudaGLUnmapBufferObject(pbo);
     }
+#else
+    if (iteration < 3)
+    {
+        // execute the kernel
+        pathtrace(scene, nullptr, frame++, iteration++);
+    }
+#endif
     else
     {
         saveImage();
