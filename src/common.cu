@@ -40,8 +40,8 @@ __host__ __device__ unsigned int utilhash(unsigned int a)
 }
 
 __host__ __device__
-thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int depth)
+thrust::default_random_engine makeSeededRandomEngine(int frames, int index, int depth)
 {
-    int h = utilhash((1 << 31) | (depth << 22) | iter) ^ utilhash(index);
+    int h = utilhash((1 << 31) | (depth << 22) | frames) ^ utilhash(index);
     return thrust::default_random_engine(h);
 }

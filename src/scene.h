@@ -3,6 +3,8 @@
 #include "sceneStructs.h"
 #include <vector>
 
+#include "pathtrace.h"
+
 struct Material;
 
 class Scene
@@ -10,7 +12,8 @@ class Scene
     glm::vec3 boxMin;
     glm::vec3 boxMax;
 public:
-    Scene();
+    Scene(PathTraceInfo Info);
+    Scene() = delete;
     ~Scene();
     void ReadJSON(const std::string& jsonName);
     void ReadGLTF(std::string filename);

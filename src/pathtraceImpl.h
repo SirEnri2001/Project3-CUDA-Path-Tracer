@@ -13,8 +13,13 @@ __global__ void computeIntersections(
 	Scene::RenderProxy* scene,
     ShadeableIntersection* intersections,
     int* device_materialIds, int* dev_pathAlive, bool preCompute);
-__global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
+__global__ void DirectLightingShadingPathSegments(int depths, int frame, int numPaths,
     PathSegment* pathSegments, ShadeableIntersection* dev_intersections,
     Scene::RenderProxy* scene,
     int* dev_pathAlive);
-__global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, PathSegment* pathSegments, int* dev_pathAlive);
+__global__ void SamplingShadingPathSegments(int depths, int frame, int numPaths,
+    PathSegment* pathSegments, ShadeableIntersection* dev_intersections,
+    Scene::RenderProxy* scene,
+    int* dev_pathAlive);
+__global__ void generateRayFromCamera(Camera cam, int frames, int maxDepths,
+    PathSegment* pathSegments, int* dev_pathAlive);

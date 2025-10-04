@@ -74,7 +74,8 @@ set(sources
     src/stb.cpp
     src/image.cpp
     src/glslUtility.cpp
-    src/pathtrace.cu
+    src/pathtrace.cpp
+    src/pathtraceCUDA.cu
     src/intersections.cu
     src/interactions.cu
     src/scene.cpp

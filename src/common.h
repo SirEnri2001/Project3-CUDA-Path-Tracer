@@ -8,4 +8,4 @@
 
 void checkCUDAErrorFn(const char* msg, const char* file, int line);
 __host__ __device__
-thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int depth);
+thrust::default_random_engine makeSeededRandomEngine(int frames, int index, int depth);

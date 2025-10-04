@@ -50,8 +50,8 @@ struct Camera
     glm::vec3 right;
     glm::vec2 fov;
     glm::vec2 pixelLength;
-    float radius;
-    glm::vec3 resetLookAt;
+    float radius = 3.f;
+    glm::vec3 resetLookAt = glm::vec3(0.f);
     void Reset()
     {
         lookAt = resetLookAt;
@@ -60,13 +60,30 @@ struct Camera
         right = glm::normalize(glm::cross(view, up));
         up = glm::cross(right, view);
     }
+    void SetCamera(float phi, float theta, float zoom, float dX, float dY)
+    {
+        view.x = -sin(phi) * sin(theta);
+        view.y = -cos(theta);
+        view.z = -cos(phi) * sin(theta);
+
+        view = glm::normalize(view);
+        glm::vec3 v = view;
+        glm::vec3 u = glm::vec3(0, 1, 0);//glm::normalize(cam.up);
+        glm::vec3 r = glm::cross(v, u);
+        up = glm::normalize(glm::cross(r, v));
+        right = glm::normalize(r);
+        position = -view * zoom * radius + lookAt;
+
+        lookAt -= dX * right * radius * pixelLength.x * zoom * 0.5f;
+        lookAt += dY * up * radius * pixelLength.y * zoom * 0.5f;
+    }
 };
 
 struct RenderState
 {
     Camera camera;
-    unsigned int iterations;
-    int traceDepth;
+    unsigned int frames;
+    int depths;
     std::vector<glm::vec3> image;
     std::string imageName;
 };

@@ -278,11 +278,6 @@ __host__ __device__ float sphereIntersectionTest(
 
     OutIntersect.intersectPoint = multiplyMV(sphere.transform, glm::vec4(objspaceIntersection, 1.f));
     OutIntersect.surfaceNormal = glm::normalize(multiplyMV(sphere.invTranspose, glm::vec4(objspaceIntersection, 0.f)));
-    if (!OutIntersect.outside)
-    {
-        OutIntersect.surfaceNormal = -OutIntersect.surfaceNormal;
-    }
-
     return glm::length(r.origin - OutIntersect.intersectPoint);
 }
 

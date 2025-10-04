@@ -1,10 +1,6 @@
 #include "pathtrace.h"
 
-#include <cstdio>
-#include <cuda.h>
-#include <cmath>
 #include <iostream>
-#include <thrust/random.h>
 #include <thrust/sort.h>
 #include <thrust/count.h>
 #include <thrust/execution_policy.h>
@@ -15,13 +11,8 @@
 #include "sceneStructs.h"
 #include "scene.h"
 #include "glm/glm.hpp"
-#include "utilities.h"
-#include "intersections.h"
-#include "interactions.h"
 #include "common.h"
 #include "pathtraceImpl.h"
-#include "mesh.h"
-#include "material.h"
 
 //Kernel that writes the image to the OpenGL PBO directly.
 __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image)
@@ -45,64 +36,6 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
 		pbo[index].y = color.y;
 		pbo[index].z = color.z;
 	}
-}
-
-static GuiDataContainer* guiData = NULL;
-static glm::vec3* dev_image = NULL;
-static PathSegment* dev_paths = NULL;
-static ShadeableIntersection* dev_path_intersections = NULL;
-static int* dev_geom_ids = nullptr;
-static int* device_pathAlive = nullptr;
-
-void InitDataContainer(GuiDataContainer* imGuiData)
-{
-	guiData = imGuiData;
-}
-
-void pathtraceNewFrame(Scene* scene)
-{
-	const Camera& cam = scene->state.camera;
-	const int pixelcount = cam.resolution.x * cam.resolution.y;
-	cudaDeviceSynchronize();
-	cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
-	cudaMemset(dev_path_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
-	cudaMemset(dev_geom_ids, -1, pixelcount * sizeof(int));
-	cudaMemset(device_pathAlive, -1, pixelcount * sizeof(int));
-}
-
-
-void pathtraceCreate(Scene* scene)
-{
-	const Camera& cam = scene->state.camera;
-	const int pixelcount = cam.resolution.x * cam.resolution.y;
-
-	checkCUDAError("before pathtraceInit");
-	cudaMalloc(&dev_image, pixelcount * sizeof(glm::vec3));
-	cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
-
-	cudaMalloc(&dev_paths, pixelcount * sizeof(PathSegment));
-
-	cudaMalloc(&dev_path_intersections, pixelcount * sizeof(ShadeableIntersection));
-	cudaMemset(dev_path_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
-	// allocate device memory for materialIds
-	cudaMalloc(&dev_geom_ids, pixelcount * sizeof(int));
-	cudaMemset(dev_geom_ids, -1, pixelcount * sizeof(int));
-
-	cudaMalloc(&device_pathAlive, pixelcount * sizeof(int));
-	cudaMemset(device_pathAlive, -1, pixelcount * sizeof(int));
-	checkCUDAError("pathtraceInit");
-
-	scene->CreateRenderProxyForAll();
-	scene->CenterCamera();
-}
-
-
-void pathtraceFree()
-{
-	cudaFree(dev_image); // no-op if dev_image is null
-	cudaFree(dev_paths);
-	cudaFree(dev_path_intersections);
-	checkCUDAError("pathtraceFree");
 }
 
 __host__ __device__
@@ -154,9 +87,8 @@ struct Pred {
 	}
 };
 
-void pathtrace(Scene* scene, uchar4* pbo, int frame, int iter)
+void pathtrace(PTEngine* Engine, Scene* scene)
 {
-	const int traceDepth = scene->state.traceDepth;
 	const Camera& cam = scene->state.camera;
 	const int pixelcount = cam.resolution.x * cam.resolution.y;
 
@@ -168,18 +100,21 @@ void pathtrace(Scene* scene, uchar4* pbo, int frame, int iter)
 
 	// 1D block for path tracing
 	const int blockSize1d = 64;
-	generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(cam, frame, iter, dev_paths, device_pathAlive);
+	auto& Resource = Engine->RenderResource;
+	auto& State = scene->state;
+	generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(cam, State.frames, Engine->Info.depths, 
+		Resource.dev_paths, Resource.device_pathAlive);
 	checkCUDAError("generate camera ray");
-	PathSegment* dev_path_begin = dev_paths;
+	PathSegment* dev_path_begin = Resource.dev_paths;
 	int total_paths = pixelcount;
 	int num_paths = pixelcount;
 	// --- PathSegment Tracing Stage ---
 	// Shoot ray into scene, bounce between objects, push shading chunks
-	std::cout << "New Frame" << std::endl;
-	for (int depth = 0; depth < traceDepth; depth++)
+	for (int depth = 0; depth < Engine->Info.depths; depth++)
 	{
 		// clean shading chunks
-		cudaMemset(dev_path_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
+		cudaMemset(Resource.dev_path_intersections, 0, 
+			pixelcount * sizeof(ShadeableIntersection));
 
 #if USE_SORT_BY_BOUNDING
 		dim3 numblocksPathSegmentTracing = (total_paths + blockSize1d - 1) / blockSize1d;
@@ -190,28 +125,28 @@ void pathtrace(Scene* scene, uchar4* pbo, int frame, int iter)
 				num_paths,
 				dev_path_begin,
 				scene->Proxy_Device,
-				dev_path_intersections,
-				dev_geom_ids, device_pathAlive, true
+				Resource.dev_path_intersections,
+				Resource.dev_geom_ids, Resource.device_pathAlive, true
 			);
 			cudaDeviceSynchronize();
 		}
 		{
-			auto t = thrust::make_tuple(device_pathAlive, dev_geom_ids);
-			auto zip_iter = thrust::make_zip_iterator(thrust::make_tuple(device_pathAlive, dev_geom_ids));
+			auto t = thrust::make_tuple(Resource.device_pathAlive, Resource.dev_geom_ids);
+			auto zip_iter = thrust::make_zip_iterator(thrust::make_tuple(Resource.device_pathAlive, Resource.dev_geom_ids));
 			auto end_iter = thrust::remove_if(thrust::device, zip_iter, zip_iter + num_paths, Pred());
 			num_paths = end_iter - zip_iter;
 			thrust::sort_by_key(
 				thrust::device,
-				dev_geom_ids,
-				dev_geom_ids + num_paths,
+				Resource.dev_geom_ids,
+				Resource.dev_geom_ids + num_paths,
 				zip_iter);
 			computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
 				depth,
 				num_paths,
 				dev_path_begin,
 				scene->Proxy_Device,
-				dev_path_intersections,
-				dev_geom_ids, device_pathAlive, false
+				Resource.dev_path_intersections,
+				Resource.dev_geom_ids, Resource.device_pathAlive, false
 			);
 
 			
@@ -235,27 +170,27 @@ void pathtrace(Scene* scene, uchar4* pbo, int frame, int iter)
 
 		std::cout << "number of paths: " << num_paths << std::endl;
 		numblocksPathSegmentTracing = (total_paths + blockSize1d - 1) / blockSize1d;
-		generateRayFromIntersections << <numblocksPathSegmentTracing, blockSize1d >> >(
-			iter, frame, num_paths, dev_path_begin,
-			dev_path_intersections,
-			scene->Proxy_Device, device_pathAlive);
-		if (guiData != NULL)
-		{
-			guiData->TracedDepth = depth;
-		}
+		DirectLightingShadingPathSegments << <numblocksPathSegmentTracing, blockSize1d >> > (
+			depth, State.frames, num_paths, dev_path_begin,
+			Resource.dev_path_intersections,
+			scene->Proxy_Device, Resource.device_pathAlive);
+		SamplingShadingPathSegments << <numblocksPathSegmentTracing, blockSize1d >> >(
+			depth, State.frames, num_paths, dev_path_begin,
+			Resource.dev_path_intersections,
+			scene->Proxy_Device, Resource.device_pathAlive);
+		Engine->GuiData.TracedDepth = depth;
 	}
 
 	// Assemble this iteration and apply it to the image
 	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
-	finalGather<<<numBlocksPixels, blockSize1d>>>(total_paths, dev_image, dev_paths, guiData?guiData->isDebug:false);
-	if (pbo)
+	finalGather<<<numBlocksPixels, blockSize1d>>>(total_paths, Resource.dev_image, Resource.dev_paths, Engine->GuiData.isDebug);
+	if (Resource.pbo)
 	{
 		// Send results to OpenGL buffer for rendering
-		sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_image);
+		sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (Resource.pbo, cam.resolution, State.frames+1, Resource.dev_image);
 	}
 	// Retrieve image from GPU
-	cudaMemcpy(scene->state.image.data(), dev_image,
-	           pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
-
+	cudaMemcpy(scene->state.image.data(), Resource.dev_image,
+		pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 	checkCUDAError("pathtrace");
 }

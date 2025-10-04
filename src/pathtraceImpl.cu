@@ -19,7 +19,7 @@
 * motion blur - jitter rays "in time"
 * lens effect - jitter ray origin positions based on a lens
 */
-__global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, PathSegment* pathSegments, int* dev_pathAlive)
+__global__ void generateRayFromCamera(Camera cam, int frames, int maxDepths, PathSegment* pathSegments, int* dev_pathAlive)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -27,7 +27,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
         int index = x + (y * cam.resolution.x);
         dev_pathAlive[index] = index;
         PathSegment& segment = pathSegments[index];
-        thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, traceDepth);
+        thrust::default_random_engine rng = makeSeededRandomEngine(frames, index, maxDepths);
         thrust::uniform_real_distribution<float> u01(0.f, 1.f);
 		float ramdomNumber1 = u01(rng);
 		float ramdomNumber2 = u01(rng);
@@ -42,9 +42,8 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
             - cam.right * cam.pixelLength.x * ((float)x + ramdomNumber1 - (float)cam.resolution.x * 0.5f)
             - cam.up * cam.pixelLength.y * ((float)y + ramdomNumber2 - (float)cam.resolution.y * 0.5f)
         );
-
         segment.pixelIndex = index;
-        segment.remainingBounces = traceDepth;
+        segment.remainingBounces = maxDepths;
 		segment.debug = glm::vec3(1, 0, 1);
     }
 }
@@ -168,15 +167,15 @@ __host__ __device__ float power_heuristic(float pdf_a, float pdf_b) {
 //    bsdfDiffuse(outBSDF, outPDF, out_wi, surfaceNormal, material);
 //}
 
-__device__ void GetNormalSpace(glm::vec3& tanX, glm::vec3& tanZ, glm::vec3 N)
+__device__ void GetNormalSpace(glm::vec3& tanX_World, glm::vec3& tanZ_World, glm::vec3 N)
 {
     glm::vec3 v(0.f, 1.f, 0.f);
     if (glm::abs(glm::dot(v, N)) > 0.999f)
     {
         v = glm::vec3(1.f, 0.f, 0.f);
     }
-    tanX = glm::normalize(glm::cross(v, N));
-    tanZ = glm::normalize(glm::cross(N, tanX));
+    tanX_World = glm::normalize(glm::cross(v, N));
+    tanZ_World = glm::normalize(glm::cross(N, tanX_World));
 }
 
 __device__ void bsdfPBR(glm::vec3& debug, glm::vec3& outBSDF, 
@@ -330,7 +329,7 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
 }
 
 
-__global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
+__global__ void DirectLightingShadingPathSegments(int depths, int frame, int numPaths,
     PathSegment* pathSegments, ShadeableIntersection* dev_intersections,
     Scene::RenderProxy* scene,
     int* dev_pathAlive)
@@ -353,20 +352,20 @@ __global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
         return;
     }
     Material material = scene->materials_Device[intersection.materialId];
-	glm::vec3 p = intersection.intersectPoint + EPSILON * intersection.surfaceNormal;
-    thrust::default_random_engine rng = makeSeededRandomEngine(frame, pathIndex, iter * path_segment.remainingBounces);
+    glm::vec3 p = intersection.intersectPoint + EPSILON * intersection.surfaceNormal;
+    thrust::default_random_engine rng = makeSeededRandomEngine(frame, pathIndex, depths * path_segment.remainingBounces);
     if (material.emittance > 0.)
     {
-		path_segment.Contribution += path_segment.BSDF * material.emittance / path_segment.PDF * path_segment.Cosine;
+        path_segment.Contribution += path_segment.BSDF * material.emittance / path_segment.PDF * path_segment.Cosine;
         path_segment.remainingBounces = 0;
         pathSegments[pathIndex] = path_segment;
         return;
     }
     glm::vec3 contrib;
     glm::vec3 debug;
-	glm::vec3 ViewDir = -path_segment.ray.direction;
+    glm::vec3 ViewDir = -path_segment.ray.direction;
 
-    thrust::uniform_int_distribution<int> uInt(0, scene->lights_size-1);
+    thrust::uniform_int_distribution<int> uInt(0, scene->lights_size - 1);
     int LightIndex = uInt(rng);
     int LightGeomIndex = scene->light_index_Device[LightIndex];
     Geom LightGeom = scene->geoms_Device[LightGeomIndex];
@@ -374,12 +373,123 @@ __global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
 
     SampleDirectLightMIS(debug, contrib, p, ViewDir, intersection.surfaceNormal, material,
         scene->geoms_size, scene->geoms_Device, scene->lights_size, LightGeom, LightMat, LightGeomIndex, rng);
-	path_segment.Contribution += path_segment.BSDF * contrib / path_segment.PDF * path_segment.Cosine;
+    path_segment.Contribution += path_segment.BSDF * contrib / path_segment.PDF * path_segment.Cosine;
+    pathSegments[pathIndex] = path_segment;
+}
+
+#define ETA (1.f / 1.5f)
+
+__device__ void btdfSample(glm::vec3& debug, bool outside, glm::vec3& outBSDF, float& outPDF, Ray& out_wi, glm::vec3 ViewDir, glm::vec3 p,
+    glm::vec3 surfaceNormal, glm::vec2 uv, const Material& material,
+    thrust::default_random_engine& rng)
+{
+    outBSDF = glm::vec3(1.0f);
+    outPDF = 1.f;
+
+    //glm::vec3 wo_Tangent, tanX_World, tanZ_World, N = outside ? surfaceNormal : -surfaceNormal;
+    //tanZ_World = glm::normalize(glm::cross(ViewDir, N));
+    //tanX_World = glm::normalize(glm::cross(N, tanZ_World));
+    //wo_Tangent.x = glm::dot(ViewDir, tanX_World);
+    //wo_Tangent.z = glm::dot(ViewDir, tanZ_World);
+    //wo_Tangent.y = glm::dot(ViewDir, N);
+    //wo_Tangent = glm::normalize(wo_Tangent);
+    //float SinTheta1 = wo_Tangent.x;
+    //glm::vec3 wi_Tangent;
+    //float eta = outside ? ETA : 1.f / ETA;
+    //wi_Tangent.x = -eta * SinTheta1;
+    //if (abs(wi_Tangent.x)>=1.0f)
+    //{
+    //    // retract a little bit so no self intersect
+    //    out_wi.origin = p + 0.0001f * N;
+    //    out_wi.direction = - glm::reflect(ViewDir, N);
+    //    return;
+    //}
+    //wi_Tangent.y = -sqrt(1.f - wi_Tangent.x * wi_Tangent.x);
+    //wi_Tangent.z = 0.f;
+    //glm::vec3 wi_World = wi_Tangent.x * tanX_World + wi_Tangent.y * N + wi_Tangent.z * tanZ_World;
+    //out_wi.direction = wi_World;
+    //if (outside)
+    //{
+    //    out_wi.origin = p - 0.001f * surfaceNormal; // minus at least this value
+    //}
+    //else
+    //{
+    //    out_wi.origin = p + 0.001f * surfaceNormal;
+    //}
+
+    glm::vec3 N = outside ? surfaceNormal : -surfaceNormal;
+    // march a little bit when passing through surface
+    if (outside)
+    {
+        out_wi.direction = glm::refract(-ViewDir, N, ETA);
+        out_wi.origin = p - 0.001f * surfaceNormal; // minus at least this value
+    }
+    else
+    {
+        out_wi.direction = glm::refract(-ViewDir, N, 1.f / ETA);
+        out_wi.origin = p + 0.001f * surfaceNormal;
+    }
+    if (glm::length(out_wi.direction)==0.f)
+    {
+        // retract a little bit so no self intersect
+        out_wi.origin = p + 0.0001f * N;
+        out_wi.direction = -glm::reflect(ViewDir, N);
+        return;
+    }
+}
+
+__global__ void SamplingShadingPathSegments(int depths, int frame, int numPaths,
+    PathSegment* pathSegments, ShadeableIntersection* dev_intersections,
+    Scene::RenderProxy* scene,
+    int* dev_pathAlive)
+{
+    int tid = (blockIdx.x * blockDim.x) + threadIdx.x;
+    int pathIndex = dev_pathAlive[tid];
+    if (pathIndex < 0)
+    {
+        return;
+    }
+    if (tid >= numPaths)
+    {
+        return;
+    }
+    PathSegment path_segment = pathSegments[pathIndex];
+    ShadeableIntersection intersection = dev_intersections[pathIndex];
+    if (intersection.materialId < 0) {
+        path_segment.remainingBounces = 0;
+        pathSegments[pathIndex] = path_segment;
+        return;
+    }
+    Material material = scene->materials_Device[intersection.materialId];
+    glm::vec3 p = intersection.intersectPoint + EPSILON * intersection.surfaceNormal;
+    thrust::default_random_engine rng = makeSeededRandomEngine(frame, pathIndex, depths);
+    if (material.emittance > 0.)
+    {
+        path_segment.Contribution += path_segment.BSDF * material.emittance / path_segment.PDF * path_segment.Cosine;
+        path_segment.remainingBounces = 0;
+        pathSegments[pathIndex] = path_segment;
+        return;
+    }
+    glm::vec3 debug;
+    glm::vec3 ViewDir = -path_segment.ray.direction;
     Ray wi;
     glm::vec3 bsdf_at_p;
-	float pdf_bsdf;
+    float pdf_bsdf;
     //bsdfDiffuseSample(bsdf_at_p, pdf_bsdf, wi, p, intersection.surfaceNormal, &material, rng);
-	bsdfPBRSample(debug, bsdf_at_p, pdf_bsdf, wi, ViewDir, p, intersection.surfaceNormal, intersection.uv, material, rng);
+    if (material.isTransmissive)
+    {
+        btdfSample(debug, intersection.outside, bsdf_at_p, pdf_bsdf, wi, ViewDir, p, intersection.surfaceNormal, intersection.uv, material, rng);
+        path_segment.remainingBounces --;
+        path_segment.ray = wi;
+        pathSegments[pathIndex] = path_segment;
+        return;
+    }
+	else
+    {
+        bsdfPBRSample(debug, bsdf_at_p, pdf_bsdf, wi, ViewDir, p, intersection.surfaceNormal, intersection.uv, material, rng);
+        path_segment.Cosine *= glm::max(0.f, glm::dot(wi.direction, intersection.surfaceNormal));
+    }
+
 	path_segment.BSDF *= bsdf_at_p;
     path_segment.PDF *= pdf_bsdf;
     if (path_segment.PDF<EPSILON)
@@ -388,7 +498,7 @@ __global__ void generateRayFromIntersections(int iter, int frame, int numPaths,
         pathSegments[pathIndex] = path_segment;
 		return;
     }
-	path_segment.Cosine *= glm::max(0.f, glm::dot(wi.direction, intersection.surfaceNormal));
+
 
     path_segment.ray = wi;
 	path_segment.remainingBounces--;

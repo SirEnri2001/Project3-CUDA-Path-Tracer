@@ -1,11 +1,46 @@
 #pragma once
 
-#include "scene.h"
+#include <vector_types.h>
+
 #include "utilities.h"
 
-void InitDataContainer(GuiDataContainer* guiData);
-void pathtraceCreate(Scene* scene);
-void pathtraceNewFrame(Scene* scene);
-void pathtraceInit(Scene *scene);
-void pathtraceFree();
-void pathtrace(Scene* scene, uchar4 *pbo, int frame, int iteration);
+class Scene;
+struct ShadeableIntersection;
+struct PathSegment;
+
+struct PathTraceInfo
+{
+	int x;
+	int y;
+	int frames;
+	int depths;
+	bool bShowGUI;
+};
+
+struct PathTraceRenderResource
+{
+	glm::vec3* dev_image = nullptr;
+	PathSegment* dev_paths = nullptr;
+	ShadeableIntersection* dev_path_intersections = nullptr;
+	int* dev_geom_ids = nullptr;
+	int* device_pathAlive = nullptr;
+	uchar4* pbo = nullptr;
+};
+
+class PTEngine
+{
+	static PTEngine* GInstance;
+public:
+	PathTraceInfo Info;
+	PathTraceRenderResource RenderResource;
+	GuiDataContainer GuiData;
+	PTEngine(PathTraceInfo InitInfo);
+	PTEngine() = delete;
+	void Init();
+	void ClearBuffers();
+	void Tick(Scene* scene);
+	void Destroy();
+	static PTEngine* Get();
+};
+
+void pathtrace(PTEngine* Engine, Scene* scene);

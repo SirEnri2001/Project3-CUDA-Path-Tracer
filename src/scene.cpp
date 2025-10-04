@@ -23,15 +23,14 @@
 using namespace std;
 using json = nlohmann::json;
 
-Scene::Scene()
+Scene::Scene(PathTraceInfo Info)
 {
     Camera& camera = state.camera;
-    RenderState& state = this->state;
-    camera.resolution.x = 800;
-    camera.resolution.y = 800;
+    camera.resolution.x = Info.x;
+    camera.resolution.y = Info.y;
     float fovy = 45.f;
-    state.iterations = 5000;
-    state.traceDepth = 8;
+    state.frames = 0;
+    state.depths = 0;
     state.imageName = "PT_Result";
 
     camera.position = glm::vec3(0.f, 5.0f, 10.5f);
@@ -66,12 +65,8 @@ void Scene::CenterCamera()
     glm::vec3 center = (boxMin + boxMax) * 0.5f;
     Camera& camera = state.camera;
     camera.resetLookAt = center;
-    camera.radius = glm::length(boxMax - boxMin) * 0.5f;
-    camera.lookAt = center;
-    camera.view = glm::vec3(0.f,-1.f,0.f);
-	camera.position = -camera.view * 3.0f * camera.radius + camera.lookAt; // 3.0 is default zoom factor
-    camera.right = glm::normalize(glm::cross(camera.view, camera.up));
-	camera.up = glm::normalize(glm::cross(camera.right, camera.view));
+    camera.radius = glm::length(boxMax - boxMin);
+    camera.Reset();
 }
 
 void Scene::CreateDefaultLight()
@@ -177,6 +172,9 @@ void Scene::ReadJSON(const std::string& jsonName)
 				const auto& col = p["TEX"]["BASECOLOR"];
                 newMaterial.BaseColorTexture = TextureManager::Get()->PreloadTexture("../texture/" + col.get<std::string>());
             }
+        }else if (p["TYPE"]=="Transmissive")
+        {
+            newMaterial.isTransmissive = true;
         }
         MatNameToID[name] = materials.size();
         materials.emplace_back(newMaterial);
@@ -220,36 +218,8 @@ void Scene::ReadJSON(const std::string& jsonName)
         geoms.push_back(newGeom);
     }
     const auto& cameraData = data["Camera"];
-    Camera& camera = state.camera;
     RenderState& state = this->state;
-    camera.resolution.x = cameraData["RES"][0];
-    camera.resolution.y = cameraData["RES"][1];
-    float fovy = cameraData["FOVY"];
-    state.iterations = cameraData["ITERATIONS"];
-    state.traceDepth = cameraData["DEPTH"];
     state.imageName = cameraData["FILE"];
-    const auto& pos = cameraData["EYE"];
-    const auto& lookat = cameraData["LOOKAT"];
-    const auto& up = cameraData["UP"];
-    camera.position = glm::vec3(pos[0], pos[1], pos[2]);
-    camera.lookAt = glm::vec3(lookat[0], lookat[1], lookat[2]);
-    camera.up = glm::vec3(up[0], up[1], up[2]);
-
-    //calculate fov based on resolution
-    float yscaled = tan(fovy * (PI / 180));
-    float xscaled = (yscaled * camera.resolution.x) / camera.resolution.y;
-    float fovx = (atan(xscaled) * 180) / PI;
-    camera.fov = glm::vec2(fovx, fovy);
-
-    camera.right = glm::normalize(glm::cross(camera.view, camera.up));
-    camera.pixelLength = glm::vec2(2 * xscaled / (float)camera.resolution.x,
-        2 * yscaled / (float)camera.resolution.y);
-
-    camera.view = glm::normalize(camera.lookAt - camera.position);
-
-    //set up render camera stuff
-    int arraylen = camera.resolution.x * camera.resolution.y;
-    state.image.resize(arraylen);
     std::fill(state.image.begin(), state.image.end(), glm::vec3());
 }
 
@@ -431,6 +401,8 @@ void Scene::PostLoad()
         }
         index++;
     }
+    boxMin = glm::vec3(0.f);
+    boxMax = glm::vec3(1.0f);
     for (const auto& g : geoms)
     {
         if (g.type == MESH && g.Mesh_Host)

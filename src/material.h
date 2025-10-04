@@ -30,6 +30,7 @@ struct Material
     Texture* EmittanceTexture = nullptr;
     Texture::RenderProxy* EmittanceTextureProxy_Device = nullptr;
     bool isLight = false;
+    bool isTransmissive = false;
 };
 
 class TextureManager

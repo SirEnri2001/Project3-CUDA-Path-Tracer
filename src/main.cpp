@@ -32,33 +32,26 @@ static std::string startTimeString;
 static bool leftMousePressed = false;
 static bool rightMousePressed = false;
 static bool middleMousePressed = false;
-static double lastX;
-static double lastY;
+static bool scrolled = false;
+static double MouseDeltaX = 0.0;
+static double MouseDeltaY = 0.0;
 
-static bool camchanged = true;
-
-float zoom = 1.7f, theta = 1.0f, phi = 1.0f;
-
-Scene* scene;
-GuiDataContainer* guiData;
-RenderState* renderState;
-int iteration;
-
-int width;
-int height;
+static double lastX = 0.0;
+static double lastY = 0.0;
+float zoom = 1.7f;
+float theta = 1.0f, phi = 1.0f;
+static bool bShouldSaveImage = false;
+static bool bShouldResetCam = false;
 
 GLuint positionLocation = 0;
 GLuint texcoordsLocation = 1;
 GLuint pbo;
 GLuint displayImage;
-
 GLFWwindow* window;
-GuiDataContainer* imguiData = NULL;
 ImGuiIO* io = nullptr;
 bool mouseOverImGuiWinow = false;
 
 // Forward declarations for window loop and interactivity
-void runCuda();
 void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods);
 void mousePositionCallback(GLFWwindow* window, double xpos, double ypos);
 void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
@@ -77,7 +70,7 @@ std::string currentTimeString()
 //----------SETUP STUFF----------
 //-------------------------------
 
-void initTextures()
+void initTextures(int width, int height)
 {
     glGenTextures(1, &displayImage);
     glBindTexture(GL_TEXTURE_2D, displayImage);
@@ -168,15 +161,7 @@ void cleanupCuda()
     }
 }
 
-void initCuda()
-{
-    cudaGLSetGLDevice(0);
-
-    // Clean up on program exit
-    atexit(cleanupCuda);
-}
-
-void initPBO()
+void initPBO(int width, int height)
 {
     // set up vertex data parameter
     int num_texels = width * height;
@@ -200,7 +185,7 @@ void errorCallback(int error, const char* description)
     __debugbreak();
 }
 
-bool init()
+bool InitGLFW(int width, int height)
 {
     glfwSetErrorCallback(errorCallback);
 
@@ -239,9 +224,11 @@ bool init()
 
     // Initialize other stuff
     initVAO();
-    initTextures();
-    initCuda();
-    initPBO();
+    initTextures(width, height);
+    cudaGLSetGLDevice(0);
+    // Clean up on program exit
+    atexit(cleanupCuda);
+    initPBO(width, height);
     GLuint passthroughProgram = initShader();
 
     glUseProgram(passthroughProgram);
@@ -250,47 +237,21 @@ bool init()
     return true;
 }
 
-void InitImguiData(GuiDataContainer* guiData)
-{
-    imguiData = guiData;
-}
-
 
 // LOOK: Un-Comment to check ImGui Usage
-void RenderImGui()
+void RenderImGui(GuiDataContainer* imguiData)
 {
     mouseOverImGuiWinow = io->WantCaptureMouse;
 
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
-
-    bool show_demo_window = true;
-    bool show_another_window = false;
-    ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
-    static float f = 0.0f;
-    static int counter = 0;
-
     ImGui::Begin("Path Tracer Analytics");                  // Create a window called "Hello, world!" and append into it.
-    
-    // LOOK: Un-Comment to check the output window and usage
-    //ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
-    //ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our window open/close state
     ImGui::Checkbox("Debug Mode", &imguiData->isDebug);
-
-    //ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
-    //ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
-
-    //if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
-    //    counter++;
-    //ImGui::SameLine();
-    //ImGui::Text("counter = %d", counter);
-    ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
-    ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+	ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
+    ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f * ImGui::GetIO().DeltaTime, ImGui::GetIO().Framerate);
     ImGui::End();
-
-
-    ImGui::Render();
+	ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
 }
@@ -300,98 +261,87 @@ bool MouseOverImGuiWindow()
     return mouseOverImGuiWinow;
 }
 
-void mainLoop(int loops = -1)
-{
-    pathtraceCreate(scene);
-#if !COMMANDLET
-    while (!glfwWindowShouldClose(window))
-    {
-        glfwPollEvents();
-        runCuda();
-        std::string title = "CIS565 Path Tracer | " + utilityCore::convertIntToString(iteration) + " Iterations";
-        glfwSetWindowTitle(window, title.c_str());
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-        glBindTexture(GL_TEXTURE_2D, displayImage);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        // Binding GL_PIXEL_UNPACK_BUFFER back to default
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-
-        // VAO, shader program, and texture already bound
-        glDrawElements(GL_TRIANGLES, 6,  GL_UNSIGNED_SHORT, 0);
-
-        // Render ImGui Stuff
-        RenderImGui();
-
-        glfwSwapBuffers(window);
-    }
-#else
-    while (loops!=0)
-    {
-        loops--;
-        runCuda();
-    }
-#endif
-
-#if !COMMANDLET
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-
-    glfwDestroyWindow(window);
-    glfwTerminate();
-#endif
-}
-
 //-------------------------------
 //-------------MAIN--------------
 //-------------------------------
+void SaveImage(PathTraceInfo PTInfo, int iteration, std::string ImageName, const std::vector<glm::vec3>& ImageData);
+
 
 int main(int argc, char** argv)
 {
+    PathTraceInfo PTInfo;
+    std::string sceneFile = "";
     startTimeString = currentTimeString();
 
-    if (argc < 2)
+    PTInfo.x = 400;
+    PTInfo.y = 400;
+    PTInfo.frames = 1000;
+    PTInfo.depths = 16;
+    PTInfo.bShowGUI = true;
+
+    for (int i = 1; i < argc; i+=2)
+    {
+        std::string key(argv[i]);
+
+        if (key=="--x")
+        {
+            PTInfo.x = std::atoi(argv[i + 1]);
+        }
+        if (key == "--y")
+        {
+            PTInfo.y = std::atoi(argv[i + 1]);
+        }
+        if (key == "--xy")
+        {
+            PTInfo.x = std::atoi(argv[i + 1]);
+            PTInfo.y = std::atoi(argv[i + 1]);
+        }
+
+        if (key=="--frames")
+        {
+            PTInfo.frames = std::atoi(argv[i + 1]);
+        }
+
+        if (key == "--depths")
+        {
+            PTInfo.depths = std::atoi(argv[i + 1]);
+        }
+        if (key=="--gui")
+        {
+            PTInfo.bShowGUI = std::atoi(argv[i + 1]) > 0;
+        }
+        else if (i==argc-1)
+        {
+            sceneFile = argv[i];
+        }
+    }
+
+    if (sceneFile.empty())
     {
         printf("Usage: %s SCENEFILE.json / SCENEFILE.gltf\n", argv[0]);
         return 1;
     }
 
-    std::string sceneFile = argv[1];
-
     // Load scene file
-    scene = new Scene();
+    Scene* SceneInstance = new Scene(PTInfo);
     if (sceneFile.find(".json")!=std::string::npos)
     {
-        scene->ReadJSON(sceneFile);
+        SceneInstance->ReadJSON(sceneFile);
     }
     else if (sceneFile.find(".gltf") != std::string::npos)
     {
-        scene->ReadGLTF(sceneFile);
+        SceneInstance->ReadGLTF(sceneFile);
     }else
     {
         printf("Usage: %s SCENEFILE.json / SCENEFILE.gltf\n", argv[0]);
         return 1;
     }
-    scene->PostLoad();
-    scene->CreateDefaultLight();
-    scene->CreateDefaultFloor();
-    //Create Instance for ImGUIData
-    guiData = new GuiDataContainer();
+    SceneInstance->PostLoad();
+    SceneInstance->CreateDefaultLight();
+    SceneInstance->CreateDefaultFloor();
 
     // Set up camera stuff from loaded path tracer settings
-    iteration = 0;
-    renderState = &scene->state;
-    Camera& cam = renderState->camera;
-    width = cam.resolution.x;
-    height = cam.resolution.y;
-
-    glm::vec3 view = cam.view;
-    glm::vec3 up = cam.up;
-    glm::vec3 right = glm::cross(view, up);
-    up = glm::cross(right, view);
-
+    Camera& cam = SceneInstance->state.camera;
     //cameraPosition = cam.position;
     //// compute phi (horizontal) and theta (vertical) relative 3D axis
     //// so, (0 0 1) is forward, (0 1 0) is up
@@ -404,35 +354,123 @@ int main(int argc, char** argv)
 
     // Initialize CUDA and GL components
 #if !COMMANDLET
-    init();
-
-    // Initialize ImGui Data
-    InitImguiData(guiData);
-    InitDataContainer(guiData);
+    InitGLFW(PTInfo.x, PTInfo.y);
 #endif
-    // GLFW main loop
-    mainLoop();
 
-    return 0;
+    // Create path tracer and scene data
+    PTEngine Engine(PTInfo);
+    Engine.Init();
+
+    SceneInstance->CreateRenderProxyForAll();
+    SceneInstance->CenterCamera();
+    cam.SetCamera(phi, theta, zoom, 0., 0.);
+    // GLFW main loop
+#if !COMMANDLET
+    while (!glfwWindowShouldClose(window) && SceneInstance->state.frames < PTInfo.frames)
+    {
+        glfwPollEvents();
+
+        bool camMoved = scrolled;
+        float transX = 0.f, transY = 0.f;
+        if (leftMousePressed && (abs(MouseDeltaX)>0.0 || abs(MouseDeltaY)>0.0))
+		{
+		    // compute new camera parameters
+		    phi -= MouseDeltaX / PTInfo.x;
+		    theta -= MouseDeltaY / PTInfo.y;
+		    theta = std::fmax(0.001f, std::fmin(theta, PI));
+            camMoved = true;
+		}
+        if (rightMousePressed && (abs(MouseDeltaX) > 0.0 || abs(MouseDeltaY) > 0.0))
+        {
+            transX = MouseDeltaX;
+            transY = MouseDeltaY;
+            camMoved = true;
+        }
+
+        if (camMoved)
+		{
+            camMoved = false;
+            cam.SetCamera(phi, theta, zoom, transX, transY);
+            Engine.ClearBuffers();
+            SceneInstance->state.frames = 0;
+		}
+        scrolled = false;
+
+        // Map OpenGL buffer object for writing from CUDA on a single GPU
+        // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
+
+        uchar4* pbo_dptr = NULL;
+        cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
+        Engine.RenderResource.pbo = pbo_dptr;
+        // execute the kernel
+        Engine.Tick(SceneInstance);
+
+        // unmap buffer object
+        cudaGLUnmapBufferObject(pbo);
+
+        std::string title = "SirEnri's CUDA Path Tracer";
+        glfwSetWindowTitle(window, title.c_str());
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+        glBindTexture(GL_TEXTURE_2D, displayImage);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, PTInfo.x, PTInfo.y, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        // Binding GL_PIXEL_UNPACK_BUFFER back to default
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+        // VAO, shader program, and texture already bound
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+
+        if (PTInfo.bShowGUI)
+        {
+            // Render ImGui Stuff
+            RenderImGui(&Engine.GuiData);
+        }
+
+        glfwSwapBuffers(window);
+        SceneInstance->state.frames++;
+    }
+#else
+    while (loops != 0)
+    {
+        loops--;
+        MainPTLoop();
+    }
+#endif
+
+    
+    Engine.Destroy();
+    cudaDeviceReset();
+
+#if !COMMANDLET
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glfwDestroyWindow(window);
+    glfwTerminate();
+#endif
+
+    exit(EXIT_SUCCESS);
 }
 
-void saveImage()
+void SaveImage(PathTraceInfo PTInfo, int iteration, std::string ImageName, const std::vector<glm::vec3>& ImageData)
 {
-    float samples = iteration;
+    float samples = (float)iteration;
     // output image file
-    Image img(width, height);
+    Image img(PTInfo.x, PTInfo.y);
 
-    for (int x = 0; x < width; x++)
+    for (int x = 0; x < PTInfo.x; x++)
     {
-        for (int y = 0; y < height; y++)
+        for (int y = 0; y < PTInfo.y; y++)
         {
-            int index = x + (y * width);
-            glm::vec3 pix = renderState->image[index];
-            img.setPixel(width - 1 - x, y, glm::vec3(pix) / samples);
+            int index = x + (y * PTInfo.x);
+            glm::vec3 pix = ImageData[index];
+            img.setPixel(PTInfo.x - 1 - x, y, glm::vec3(pix) / samples);
         }
     }
 
-    std::string filename = renderState->imageName;
+    std::string filename = ImageName;
     std::ostringstream ss;
     ss << filename << "." << startTimeString << "." << samples << "samp";
     filename = ss.str();
@@ -440,64 +478,6 @@ void saveImage()
     // CHECKITOUT
     img.savePNG(filename);
     //img.saveHDR(filename);  // Save a Radiance HDR file
-}
-
-int frame = 0;
-void runCuda()
-{
-    if (camchanged)
-    {
-        iteration = 0;
-        Camera& cam = renderState->camera;
-        cam.view.x = -sin(phi) * sin(theta);
-        cam.view.y = -cos(theta);
-        cam.view.z = -cos(phi) * sin(theta);
-
-        cam.view = glm::normalize(cam.view);
-        glm::vec3 v = cam.view;
-        glm::vec3 u = glm::vec3(0, 1, 0);//glm::normalize(cam.up);
-        glm::vec3 r = glm::cross(v, u);
-        cam.up = glm::normalize(glm::cross(r, v));
-        cam.right = glm::normalize(r);
-        cam.position =  - cam.view * zoom * cam.radius + cam.lookAt;
-        //cameraPosition += cam.lookAt;
-        //cam.position = cameraPosition;
-        camchanged = false;
-    }
-
-    // Map OpenGL buffer object for writing from CUDA on a single GPU
-    // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
-
-    if (iteration == 0)
-    {
-        pathtraceNewFrame(scene);
-    }
-
-#if !COMMANDLET
-    if (iteration < 5000)
-    {
-        uchar4* pbo_dptr = NULL;
-        cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
-        // execute the kernel
-        pathtrace(scene, pbo_dptr, frame++, iteration++);
-
-        // unmap buffer object
-        cudaGLUnmapBufferObject(pbo);
-    }
-#else
-    if (iteration < 3)
-    {
-        // execute the kernel
-        pathtrace(scene, nullptr, frame++, iteration++);
-    }
-#endif
-    else
-    {
-        saveImage();
-        pathtraceFree();
-        cudaDeviceReset();
-        exit(EXIT_SUCCESS);
-    }
 }
 
 //-------------------------------
@@ -511,18 +491,14 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
         switch (key)
         {
         case GLFW_KEY_ESCAPE:
-            saveImage();
+            bShouldSaveImage = true;
             glfwSetWindowShouldClose(window, GL_TRUE);
             break;
         case GLFW_KEY_S:
-            saveImage();
+            bShouldSaveImage = true;
             break;
         case GLFW_KEY_SPACE:
-            camchanged = true;
-            renderState = &scene->state;
-            Camera& cam = renderState->camera;
-            cam.Reset();
-            //cam.lookAt = ogLookAt;
+            bShouldResetCam = true;
             break;
         }
     }
@@ -542,42 +518,22 @@ void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
 
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
 {
+    scrolled = true;
     if (yoffset > 0)
     {
         zoom -= 0.1f;
         zoom = std::fmax(0.1f, zoom);
-        camchanged = true;
     }
     else if (yoffset < 0)
     {
         zoom += 0.1f;
-        camchanged = true;
 	}
 }
 
 void mousePositionCallback(GLFWwindow* window, double xpos, double ypos)
 {
-    if (xpos == lastX || ypos == lastY)
-    {
-        return; // otherwise, clicking back into window causes re-start
-    }
-
-    if (leftMousePressed)
-    {
-        // compute new camera parameters
-        phi -= (xpos - lastX) / width;
-        theta -= (ypos - lastY) / height;
-        theta = std::fmax(0.001f, std::fmin(theta, PI));
-        camchanged = true;
-    }
-    else if (rightMousePressed)
-    {
-        renderState = &scene->state;
-        Camera& cam = renderState->camera;
-        cam.lookAt -= (float)(xpos - lastX) * cam.right * cam.radius * cam.pixelLength.x * zoom * 0.5f;
-        cam.lookAt += (float)(ypos - lastY) * cam.up * cam.radius * cam.pixelLength.y * zoom * 0.5f;
-        camchanged = true;
-    }
+    MouseDeltaX = xpos - lastX;
+    MouseDeltaY = ypos - lastY;
     lastX = xpos;
     lastY = ypos;
 }
