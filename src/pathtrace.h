@@ -14,7 +14,7 @@ struct PathTraceInfo
 	int y;
 	int frames;
 	int depths;
-	bool bShowGUI;
+	int ShowGUI; // 0: commandlet, 1: Show window but no imgui, 2: Show window with imgui
 };
 
 struct PathTraceRenderResource

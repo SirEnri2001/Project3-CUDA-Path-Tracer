@@ -249,7 +249,8 @@ void RenderImGui(GuiDataContainer* imguiData)
     ImGui::Begin("Path Tracer Analytics");                  // Create a window called "Hello, world!" and append into it.
     ImGui::Checkbox("Debug Mode", &imguiData->isDebug);
 	ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
-    ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f * ImGui::GetIO().DeltaTime, ImGui::GetIO().Framerate);
+    bShouldSaveImage = ImGui::Button("Save Image");
+    ImGui::Text("%.3f ms/frame (%.1f FPS)", 1000.0f * ImGui::GetIO().DeltaTime, ImGui::GetIO().Framerate);
     ImGui::End();
 	ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -275,9 +276,9 @@ int main(int argc, char** argv)
 
     PTInfo.x = 400;
     PTInfo.y = 400;
-    PTInfo.frames = 1000;
+    PTInfo.frames = -1;
     PTInfo.depths = 16;
-    PTInfo.bShowGUI = true;
+    PTInfo.ShowGUI = 2;
 
     for (int i = 1; i < argc; i+=2)
     {
@@ -287,39 +288,64 @@ int main(int argc, char** argv)
         {
             PTInfo.x = std::atoi(argv[i + 1]);
         }
-        if (key == "--y")
+        else if (key == "--y")
         {
             PTInfo.y = std::atoi(argv[i + 1]);
         }
-        if (key == "--xy")
+        else if (key == "--xy")
         {
             PTInfo.x = std::atoi(argv[i + 1]);
             PTInfo.y = std::atoi(argv[i + 1]);
         }
 
-        if (key=="--frames")
+        else if (key=="--frames")
         {
             PTInfo.frames = std::atoi(argv[i + 1]);
         }
 
-        if (key == "--depths")
+        else if (key == "--depths")
         {
             PTInfo.depths = std::atoi(argv[i + 1]);
         }
-        if (key=="--gui")
+        else if (key=="--gui")
         {
-            PTInfo.bShowGUI = std::atoi(argv[i + 1]) > 0;
+            PTInfo.ShowGUI = std::atoi(argv[i + 1]);
         }
         else if (i==argc-1)
         {
             sceneFile = argv[i];
         }
+    	else
+        {
+            std::cerr << "Unknown option: " << argv[i] << std::endl;
+            printf("Usage: %s SCENEFILE.json / SCENEFILE.gltf\n", argv[0]);
+            return 1;
+        }
     }
 
     if (sceneFile.empty())
     {
-        printf("Usage: %s SCENEFILE.json / SCENEFILE.gltf\n", argv[0]);
+        printf("No scene file given! \n");
         return 1;
+    }
+
+    std::cout << "SirEnri's Path Tracer [MIT License]" << std::endl;
+    std::cout << "Scene File: " << sceneFile << std::endl;
+    std::cout << "Viewport Size: "<<PTInfo.x<<", "<<PTInfo.y << std::endl;
+    if (PTInfo.frames<0)
+    {
+        std::cout << "Total Frames: " << "Unlimited" << std::endl;
+    }else
+    {
+        std::cout << "Total Frames: " << PTInfo.frames << std::endl;
+    }
+    std::cout << "Total Depths: " << PTInfo.depths << std::endl;
+    if (PTInfo.ShowGUI==0)
+    {
+        std::cout << "Running in Commandlet Mode" << std::endl;
+    }else
+    {
+        std::cout << "Running in GUI Mode. Please use Commandlet (--gui 0) to profile in NSight Compute" << std::endl;
     }
 
     // Load scene file
@@ -331,9 +357,10 @@ int main(int argc, char** argv)
     else if (sceneFile.find(".gltf") != std::string::npos)
     {
         SceneInstance->ReadGLTF(sceneFile);
-    }else
+    }
+	else
     {
-        printf("Usage: %s SCENEFILE.json / SCENEFILE.gltf\n", argv[0]);
+        printf("Unsupported file type: %s\n", sceneFile.c_str());
         return 1;
     }
     SceneInstance->PostLoad();
@@ -342,20 +369,12 @@ int main(int argc, char** argv)
 
     // Set up camera stuff from loaded path tracer settings
     Camera& cam = SceneInstance->state.camera;
-    //cameraPosition = cam.position;
-    //// compute phi (horizontal) and theta (vertical) relative 3D axis
-    //// so, (0 0 1) is forward, (0 1 0) is up
-    //glm::vec3 viewXZ = glm::vec3(view.x, 0.0f, view.z);
-    //glm::vec3 viewZY = glm::vec3(0.0f, view.y, view.z);
-    //phi = glm::acos(glm::dot(glm::normalize(viewXZ), glm::vec3(0, 0, -1)));
-    //theta = glm::acos(glm::dot(glm::normalize(viewZY), glm::vec3(0, 1, 0)));
-    //ogLookAt = cam.lookAt;
-    //zoom = glm::length(cam.position - ogLookAt);
 
     // Initialize CUDA and GL components
-#if !COMMANDLET
-    InitGLFW(PTInfo.x, PTInfo.y);
-#endif
+    if (PTInfo.ShowGUI>0)
+    {
+        InitGLFW(PTInfo.x, PTInfo.y);
+    }
 
     // Create path tracer and scene data
     PTEngine Engine(PTInfo);
@@ -365,80 +384,96 @@ int main(int argc, char** argv)
     SceneInstance->CenterCamera();
     cam.SetCamera(phi, theta, zoom, 0., 0.);
     // GLFW main loop
-#if !COMMANDLET
-    while (!glfwWindowShouldClose(window) && SceneInstance->state.frames < PTInfo.frames)
-    {
-        glfwPollEvents();
-
-        bool camMoved = scrolled;
-        float transX = 0.f, transY = 0.f;
-        if (leftMousePressed && (abs(MouseDeltaX)>0.0 || abs(MouseDeltaY)>0.0))
-		{
-		    // compute new camera parameters
-		    phi -= MouseDeltaX / PTInfo.x;
-		    theta -= MouseDeltaY / PTInfo.y;
-		    theta = std::fmax(0.001f, std::fmin(theta, PI));
-            camMoved = true;
-		}
-        if (rightMousePressed && (abs(MouseDeltaX) > 0.0 || abs(MouseDeltaY) > 0.0))
+    if (PTInfo.ShowGUI > 0) {
+        while (!glfwWindowShouldClose(window) && (PTInfo.frames<0 || SceneInstance->state.frames < PTInfo.frames))
         {
-            transX = MouseDeltaX;
-            transY = MouseDeltaY;
-            camMoved = true;
+            glfwPollEvents();
+
+            bool camMoved = scrolled;
+            float transX = 0.f, transY = 0.f;
+            if (leftMousePressed && (abs(MouseDeltaX) > 0.0 || abs(MouseDeltaY) > 0.0))
+            {
+                // compute new camera parameters
+                phi -= MouseDeltaX / PTInfo.x;
+                theta -= MouseDeltaY / PTInfo.y;
+                theta = std::fmax(0.001f, std::fmin(theta, PI));
+                camMoved = true;
+            }
+            if (rightMousePressed && (abs(MouseDeltaX) > 0.0 || abs(MouseDeltaY) > 0.0))
+            {
+                transX = MouseDeltaX;
+                transY = MouseDeltaY;
+                camMoved = true;
+            }
+            if (bShouldResetCam)
+            {
+                bShouldResetCam = false;
+                cam.Reset();
+                camMoved = true;
+            }
+            if (camMoved)
+            {
+                camMoved = false;
+                cam.SetCamera(phi, theta, zoom, transX, transY);
+                Engine.ClearBuffers();
+                SceneInstance->state.frames = 0;
+            }
+            scrolled = false;
+
+            // Map OpenGL buffer object for writing from CUDA on a single GPU
+            // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
+
+            uchar4* pbo_dptr = NULL;
+            cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
+            Engine.RenderResource.pbo = pbo_dptr;
+            // execute the kernel
+            Engine.Tick(SceneInstance);
+
+            // unmap buffer object
+            cudaGLUnmapBufferObject(pbo);
+
+            std::string title = "SirEnri's CUDA Path Tracer";
+            glfwSetWindowTitle(window, title.c_str());
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+            glBindTexture(GL_TEXTURE_2D, displayImage);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, PTInfo.x, PTInfo.y, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+            glClear(GL_COLOR_BUFFER_BIT);
+
+            // Binding GL_PIXEL_UNPACK_BUFFER back to default
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+            // VAO, shader program, and texture already bound
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+
+            if (PTInfo.ShowGUI==2)
+            {
+                // Render ImGui Stuff
+                RenderImGui(&Engine.GuiData);
+            }
+            if (bShouldSaveImage)
+            {
+                bShouldSaveImage = false;
+                std::cout << "Saving image at frame " << SceneInstance->state.frames << std::endl;
+                SaveImage(PTInfo, SceneInstance->state.frames, "PT", SceneInstance->state.image);
+            }
+            glfwSwapBuffers(window);
+            SceneInstance->state.frames++;
         }
-
-        if (camMoved)
-		{
-            camMoved = false;
-            cam.SetCamera(phi, theta, zoom, transX, transY);
-            Engine.ClearBuffers();
-            SceneInstance->state.frames = 0;
-		}
-        scrolled = false;
-
-        // Map OpenGL buffer object for writing from CUDA on a single GPU
-        // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
-
-        uchar4* pbo_dptr = NULL;
-        cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
-        Engine.RenderResource.pbo = pbo_dptr;
-        // execute the kernel
-        Engine.Tick(SceneInstance);
-
-        // unmap buffer object
-        cudaGLUnmapBufferObject(pbo);
-
-        std::string title = "SirEnri's CUDA Path Tracer";
-        glfwSetWindowTitle(window, title.c_str());
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-        glBindTexture(GL_TEXTURE_2D, displayImage);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, PTInfo.x, PTInfo.y, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        // Binding GL_PIXEL_UNPACK_BUFFER back to default
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-
-        // VAO, shader program, and texture already bound
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
-
-        if (PTInfo.bShowGUI)
+    }
+    else {
+        while (SceneInstance->state.frames < PTInfo.frames)
         {
-            // Render ImGui Stuff
-            RenderImGui(&Engine.GuiData);
+            Engine.RenderResource.pbo = nullptr;
+            // execute the kernel
+            Engine.Tick(SceneInstance);
+            SceneInstance->state.frames++;
+            if (SceneInstance->state.frames%20)
+            {
+                SaveImage(PTInfo, SceneInstance->state.frames, "PT", SceneInstance->state.image);
+            }
         }
-
-        glfwSwapBuffers(window);
-        SceneInstance->state.frames++;
     }
-#else
-    while (loops != 0)
-    {
-        loops--;
-        MainPTLoop();
-    }
-#endif
-
-    
+    SaveImage(PTInfo, SceneInstance->state.frames, "PT_Final", SceneInstance->state.image);
     Engine.Destroy();
     cudaDeviceReset();
 
@@ -454,9 +489,9 @@ int main(int argc, char** argv)
     exit(EXIT_SUCCESS);
 }
 
-void SaveImage(PathTraceInfo PTInfo, int iteration, std::string ImageName, const std::vector<glm::vec3>& ImageData)
+void SaveImage(PathTraceInfo PTInfo, int frames, std::string ImageName, const std::vector<glm::vec3>& ImageData)
 {
-    float samples = (float)iteration;
+    float samples = (float)frames;
     // output image file
     Image img(PTInfo.x, PTInfo.y);
 
@@ -472,7 +507,7 @@ void SaveImage(PathTraceInfo PTInfo, int iteration, std::string ImageName, const
 
     std::string filename = ImageName;
     std::ostringstream ss;
-    ss << filename << "." << startTimeString << "." << samples << "samp";
+    ss << filename << "." << startTimeString << ".frames" << frames;
     filename = ss.str();
 
     // CHECKITOUT

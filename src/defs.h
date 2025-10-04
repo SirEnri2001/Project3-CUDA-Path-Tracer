@@ -1,7 +1,7 @@
 #pragma once
 
 // use for not showing glfw window, so NSight compute can run
-#define COMMANDLET 0
+#define COMMANDLET 1
 
 // Enable BVH acceleration
 #define USE_MESH_GRID_ACCELERATION 1
