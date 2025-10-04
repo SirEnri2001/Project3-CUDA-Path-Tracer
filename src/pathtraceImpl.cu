@@ -137,6 +137,7 @@ __global__ void computeIntersections(
         // The ray hits something
         int matId = scene->geoms_Device[hit_geom_index].materialid;
         Intersect.materialId = matId;
+        pathSegment.debug = Intersect.surfaceNormal;
 		pathSegments[path_index] = pathSegment;
     }
 	intersections[path_index] = Intersect;

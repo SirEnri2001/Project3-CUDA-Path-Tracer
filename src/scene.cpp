@@ -65,7 +65,7 @@ void Scene::CenterCamera()
     glm::vec3 center = (boxMin + boxMax) * 0.5f;
     Camera& camera = state.camera;
     camera.resetLookAt = center;
-    camera.radius = glm::length(boxMax - boxMin);
+    camera.radius = glm::length(boxMax - boxMin)*0.5f;
     camera.Reset();
 }
 
@@ -401,8 +401,8 @@ void Scene::PostLoad()
         }
         index++;
     }
-    boxMin = glm::vec3(0.f);
-    boxMax = glm::vec3(1.0f);
+    boxMin = glm::vec3(FLT_MAX);
+    boxMax = glm::vec3(-FLT_MAX);
     for (const auto& g : geoms)
     {
         if (g.type == MESH && g.Mesh_Host)
