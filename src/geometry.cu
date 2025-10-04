@@ -731,7 +731,7 @@ __device__ float meshIntersectionTest_Optimized(
     glm::vec3& debug,
     const Geom& mesh, StaticMesh::RenderProxy* dev_staticMesh,
     const Ray& ray_World,
-    ShadeableIntersection& OutIntersectionWorld, bool preCompute)
+    ShadeableIntersection& OutIntersectionWorld)
 {
     float t_local;
     float t_min_boundspace = FLT_MAX;
@@ -749,18 +749,6 @@ __device__ float meshIntersectionTest_Optimized(
         0,
         dev_staticMesh, true, t_min_boundspace
     );
-
-    if (preCompute)
-    {
-        if (t_local > 0.f)
-        {
-            OutIntersectionWorld.intersectPoint = glm::vec3(multiplyMV(mesh.transform, glm::vec4(TempIntersectLocal.intersectPoint, 1.f)));
-            OutIntersectionWorld.surfaceNormal = glm::normalize(glm::vec3(multiplyMV(mesh.invTranspose, glm::vec4(TempIntersectLocal.surfaceNormal, 0.f))));
-            return t_local;
-        }
-        return -1.0f;
-    }
-
     if (t_local < 0.f)
     {
         return -1.0f;

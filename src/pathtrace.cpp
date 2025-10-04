@@ -1,5 +1,6 @@
 #include "pathtrace.h"
 #include "common.h"
+#include "sceneStructs.h"
 
 PTEngine* PTEngine::GInstance = nullptr;
 

@@ -1,5 +1,4 @@
 #include <thrust/random.h>
-#include "intersections.h"
 
 #define ERRORCHECK 1
 

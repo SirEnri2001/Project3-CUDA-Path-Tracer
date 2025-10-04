@@ -365,7 +365,7 @@ int main(int argc, char** argv)
     }
     SceneInstance->PostLoad();
     SceneInstance->CreateDefaultLight();
-    SceneInstance->CreateDefaultFloor();
+    //SceneInstance->CreateDefaultFloor();
 
     // Set up camera stuff from loaded path tracer settings
     Camera& cam = SceneInstance->state.camera;

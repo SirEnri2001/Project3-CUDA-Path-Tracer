@@ -103,7 +103,7 @@ void pathtrace(PTEngine* Engine, Scene* scene)
 	auto& Resource = Engine->RenderResource;
 	auto& State = scene->state;
 	generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(cam, State.frames, Engine->Info.depths, 
-		Resource.dev_paths, Resource.device_pathAlive);
+		Resource.dev_paths, Resource.device_pathAlive, Resource.dev_path_intersections);
 	checkCUDAError("generate camera ray");
 	PathSegment* dev_path_begin = Resource.dev_paths;
 	int total_paths = pixelcount;
@@ -112,25 +112,17 @@ void pathtrace(PTEngine* Engine, Scene* scene)
 	// Shoot ray into scene, bounce between objects, push shading chunks
 	for (int depth = 0; depth < Engine->Info.depths; depth++)
 	{
-		// clean shading chunks
-		cudaMemset(Resource.dev_path_intersections, 0, 
-			pixelcount * sizeof(ShadeableIntersection));
-
 #if USE_SORT_BY_BOUNDING
 		dim3 numblocksPathSegmentTracing = (total_paths + blockSize1d - 1) / blockSize1d;
 		{
 			// tracing
-			computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> >(
-				depth,
+			PreIntersect << <numblocksPathSegmentTracing, blockSize1d >> >(
 				num_paths,
 				dev_path_begin,
 				scene->Proxy_Device,
 				Resource.dev_path_intersections,
-				Resource.dev_geom_ids, Resource.device_pathAlive, true
+				Resource.dev_geom_ids, Resource.device_pathAlive
 			);
-			cudaDeviceSynchronize();
-		}
-		{
 			auto t = thrust::make_tuple(Resource.device_pathAlive, Resource.dev_geom_ids);
 			auto zip_iter = thrust::make_zip_iterator(thrust::make_tuple(Resource.device_pathAlive, Resource.dev_geom_ids));
 			auto end_iter = thrust::remove_if(thrust::device, zip_iter, zip_iter + num_paths, Pred());
@@ -140,16 +132,13 @@ void pathtrace(PTEngine* Engine, Scene* scene)
 				Resource.dev_geom_ids,
 				Resource.dev_geom_ids + num_paths,
 				zip_iter);
-			computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
-				depth,
+			Intersect << <numblocksPathSegmentTracing, blockSize1d >> > (
 				num_paths,
 				dev_path_begin,
 				scene->Proxy_Device,
 				Resource.dev_path_intersections,
-				Resource.dev_geom_ids, Resource.device_pathAlive, false
+				Resource.dev_geom_ids, Resource.device_pathAlive
 			);
-
-			
 		}
 #else
 		dim3 numblocksPathSegmentTracing = (total_paths + blockSize1d - 1) / blockSize1d;

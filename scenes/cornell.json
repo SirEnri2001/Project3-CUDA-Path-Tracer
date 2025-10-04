@@ -5,7 +5,7 @@
         {
             "TYPE":"Emitting",
             "RGB":[1.0, 1.0, 1.0],
-            "EMITTANCE":8.0
+            "EMITTANCE":16.0
         },
         "mesh_light":
         {

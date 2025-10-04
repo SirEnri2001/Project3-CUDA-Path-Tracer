@@ -1,16 +1,98 @@
 #include "pathtraceImpl.h"
+
+#include <glm/gtx/transform.hpp>
+
 #include "defs.h"
 #include "bsdf.h"
 #include "common.h"
 #include "geometry.h"
-#include "interactions.h"
-#include "intersections.h"
 #include "sceneStructs.h"
 #include "utilities.h"
-#include "mesh.h"
 #include "material.h"
 #include "renderproxy.h"
 #include "scene.h"
+
+
+__host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
+    glm::vec3 normal,
+    thrust::default_random_engine& rng)
+{
+    thrust::uniform_real_distribution<float> u01(0, 1);
+
+    float up = sqrt(u01(rng)); // cos(theta)
+    float over = sqrt(1 - up * up); // sin(theta)
+    float around = u01(rng) * TWO_PI;
+
+    // Find a direction that is not the normal based off of whether or not the
+    // normal's components are all equal to sqrt(1/3) or whether or not at
+    // least one component is less than sqrt(1/3). Learned this trick from
+    // Peter Kutz.
+
+    glm::vec3 directionNotNormal;
+    if (abs(normal.x) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(1, 0, 0);
+    }
+    else if (abs(normal.y) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(0, 1, 0);
+    }
+    else
+    {
+        directionNotNormal = glm::vec3(0, 0, 1);
+    }
+
+    // Use not-normal direction to generate two perpendicular directions
+    glm::vec3 perpendicularDirection1 =
+        glm::normalize(glm::cross(normal, directionNotNormal));
+    glm::vec3 perpendicularDirection2 =
+        glm::normalize(glm::cross(normal, perpendicularDirection1));
+
+    return up * normal
+        + cos(around) * over * perpendicularDirection1
+        + sin(around) * over * perpendicularDirection2;
+}
+
+__host__ __device__ glm::vec3 sampleHemisphere(
+    glm::vec3 normal,
+    thrust::default_random_engine& rng)
+{
+    thrust::uniform_real_distribution<float> u01(0, 1);
+
+    float up = sqrt(u01(rng)); // cos(theta)
+    float over = sqrt(1 - up * up); // sin(theta)
+    float around = u01(rng) * TWO_PI;
+
+    // Find a direction that is not the normal based off of whether or not the
+    // normal's components are all equal to sqrt(1/3) or whether or not at
+    // least one component is less than sqrt(1/3). Learned this trick from
+    // Peter Kutz.
+
+    glm::vec3 directionNotNormal;
+    if (abs(normal.x) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(1, 0, 0);
+    }
+    else if (abs(normal.y) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(0, 1, 0);
+    }
+    else
+    {
+        directionNotNormal = glm::vec3(0, 0, 1);
+    }
+
+    // Use not-normal direction to generate two perpendicular directions
+    glm::vec3 perpendicularDirection1 =
+        glm::normalize(glm::cross(normal, directionNotNormal));
+    glm::vec3 perpendicularDirection2 =
+        glm::normalize(glm::cross(normal, perpendicularDirection1));
+
+    return up * normal
+        + cos(around) * over * perpendicularDirection1
+        + sin(around) * over * perpendicularDirection2;
+}
+
 /**
 * Generate PathSegments with rays from the camera through the screen into the
 * scene, which is the first bounce of rays.
@@ -19,7 +101,7 @@
 * motion blur - jitter rays "in time"
 * lens effect - jitter ray origin positions based on a lens
 */
-__global__ void generateRayFromCamera(Camera cam, int frames, int maxDepths, PathSegment* pathSegments, int* dev_pathAlive)
+__global__ void generateRayFromCamera(Camera cam, int frames, int maxDepths, PathSegment* pathSegments, int* dev_pathAlive, ShadeableIntersection* dev_Intersections)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -29,12 +111,12 @@ __global__ void generateRayFromCamera(Camera cam, int frames, int maxDepths, Pat
         PathSegment& segment = pathSegments[index];
         thrust::default_random_engine rng = makeSeededRandomEngine(frames, index, maxDepths);
         thrust::uniform_real_distribution<float> u01(0.f, 1.f);
-		float ramdomNumber1 = u01(rng);
-		float ramdomNumber2 = u01(rng);
+        float ramdomNumber1 = u01(rng);
+        float ramdomNumber2 = u01(rng);
         segment.ray.origin = cam.position;
         segment.Contribution = glm::vec3(0.0f, 0.0f, 0.0f);
-		segment.BSDF = glm::vec3(1.0f, 1.0f, 1.0f);
-		segment.PDF = 1.0f;
+        segment.BSDF = glm::vec3(1.0f, 1.0f, 1.0f);
+        segment.PDF = 1.0f;
         segment.Cosine = 1.0f;
 
         // TODO: implement antialiasing by jittering the ray
@@ -44,103 +126,15 @@ __global__ void generateRayFromCamera(Camera cam, int frames, int maxDepths, Pat
         );
         segment.pixelIndex = index;
         segment.remainingBounces = maxDepths;
-		segment.debug = glm::vec3(1, 0, 1);
+        segment.debug = glm::vec3(1, 0, 1);
+        ShadeableIntersection Intersection;
+        Intersection.t_min_World = FLT_MAX;
+        Intersection.materialId = -1;
+        Intersection.intersectBVH = false;
+        Intersection.surfaceNormal = glm::vec3(0.f, 0.f, 0.f);
+        Intersection.outside = true;
+        dev_Intersections[index] = Intersection;
     }
-}
-
-__device__ float getIntersectionGeometryIndex(
-    glm::vec3& debug,
-    int& hit_geom_index,
-    ShadeableIntersection& OutIntersect,
-    Ray& InRayWorld,
-    int geoms_size,
-	Geom* geoms, bool preCompute = false
-)
-{
-    float t = -1.0f;
-    float t_min = FLT_MAX;
-    ShadeableIntersection TempIntersect;
-    // naive parse through global geoms
-
-    for (int i = 0; i < geoms_size; i++)
-    {
-        Geom& geom = geoms[i];
-
-        if (geom.type == CUBE)
-        {
-            t = boxIntersectionTest(geom, InRayWorld, TempIntersect);
-        }
-        else if (geom.type == SPHERE)
-        {
-            t = sphereIntersectionTest(geom, InRayWorld, TempIntersect);
-        }
-    	else if (geom.type == PLANE)
-        {
-            t = planeIntersectionTest(geom, InRayWorld, TempIntersect);
-        }else if (geom.type==MESH && geom.MeshProxy_Device!=nullptr)
-        {
-#if USE_MESH_GRID_ACCELERATION
-			t = meshIntersectionTest_Optimized(debug, geom, geom.MeshProxy_Device, InRayWorld, TempIntersect, preCompute);
-#else
-            t = meshIntersectionTest(geom, geom.MeshProxy_Device, InRayWorld, OutIntersect);
-#endif
-        }
-        // Compute the minimum t from the intersection tests to determine what
-        // scene geometry object was hit first.
-        if (t > 0.0f && t_min > t)
-        {
-            t_min = t;
-            hit_geom_index = i;
-			OutIntersect = TempIntersect;
-        }
-    }
-    return t_min;
-}
-
-__global__ void computeIntersections(
-    int depth,
-    int num_paths,
-    PathSegment* pathSegments,
-    Scene::RenderProxy* scene,
-    ShadeableIntersection* intersections,
-    int* dev_geom_ids, int* dev_pathAlive, bool preCompute)
-{
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-	int path_index = dev_pathAlive[tid];
-    if (path_index < 0 || tid >= num_paths)
-    {
-        return;
-    }
-    PathSegment pathSegment = pathSegments[path_index];
-	// If there are no remaining bounces, no need to trace
-    if (pathSegment.remainingBounces <= 0) {
-        intersections[path_index].materialId = -1;
-        dev_geom_ids[path_index] = -1;
-        dev_pathAlive[tid] = -1;
-        return;
-	}
-    int hit_geom_index = -1;
-    ShadeableIntersection Intersect = intersections[path_index];
-    glm::vec3 debug;
-    getIntersectionGeometryIndex(debug,
-        hit_geom_index, Intersect,
-        pathSegment.ray, scene->geoms_size, scene->geoms_Device, preCompute);
-
-    dev_geom_ids[path_index] = hit_geom_index;
-    if (hit_geom_index == -1)
-    {
-        Intersect.materialId = -1;
-        dev_pathAlive[tid] = -1;
-    }
-    else
-    {
-        // The ray hits something
-        int matId = scene->geoms_Device[hit_geom_index].materialid;
-        Intersect.materialId = matId;
-        pathSegment.debug = Intersect.surfaceNormal;
-		pathSegments[path_index] = pathSegment;
-    }
-	intersections[path_index] = Intersect;
 }
 
 __host__ __device__ float power_heuristic(float pdf_a, float pdf_b) {
@@ -278,10 +272,14 @@ __device__ bool sampleLightFromIntersections(
     outPdf *= distance * distance;
 	int hit_geom_index = -1;
     ShadeableIntersection Intersect;
-	getIntersectionGeometryIndex(debug, 
+    IntersectGeometry(debug,
 		hit_geom_index,
         Intersect,
         wj, geomSize, geoms);
+    IntersectMesh(debug,
+        hit_geom_index,
+        Intersect,
+        wj, geomSize, geoms, Intersect.t_min_World);
     outDirectLight += light_mat.emittance;
     return dotProduct > 0.0001f && glm::length(Intersect.intersectPoint - lightPosition) < 0.001f;
 }
@@ -315,7 +313,8 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
     //bsdfDiffuseSample(bsdf, pdf_bsdf, wj, In_p, InSurfaceNormal, &InSurfaceMat, rng);
     int hit_index = -1;
     ShadeableIntersection Intersect;
-    getIntersectionGeometryIndex(debug,hit_index, Intersect, wj, GeomSize, Geoms);
+    IntersectGeometry(debug,hit_index, Intersect, wj, GeomSize, Geoms);
+    //IntersectMesh(debug, hit_index, Intersect, wj, GeomSize, Geoms, Intersect.t_min_World);
     if (hit_index != LightGeomIndex)
     {
        OutContribution = glm::vec3(0.f);
@@ -374,7 +373,9 @@ __global__ void DirectLightingShadingPathSegments(int depths, int frame, int num
 
     SampleDirectLightMIS(debug, contrib, p, ViewDir, intersection.surfaceNormal, material,
         scene->geoms_size, scene->geoms_Device, scene->lights_size, LightGeom, LightMat, LightGeomIndex, rng);
-    path_segment.Contribution += path_segment.BSDF * contrib / path_segment.PDF * path_segment.Cosine;
+
+    path_segment.debug = intersection.surfaceNormal;
+	path_segment.Contribution += path_segment.BSDF * contrib / path_segment.PDF * path_segment.Cosine;
     pathSegments[pathIndex] = path_segment;
 }
 
@@ -485,12 +486,8 @@ __global__ void SamplingShadingPathSegments(int depths, int frame, int numPaths,
         pathSegments[pathIndex] = path_segment;
         return;
     }
-	else
-    {
-        bsdfPBRSample(debug, bsdf_at_p, pdf_bsdf, wi, ViewDir, p, intersection.surfaceNormal, intersection.uv, material, rng);
-        path_segment.Cosine *= glm::max(0.f, glm::dot(wi.direction, intersection.surfaceNormal));
-    }
-
+    bsdfPBRSample(debug, bsdf_at_p, pdf_bsdf, wi, ViewDir, p, intersection.surfaceNormal, intersection.uv, material, rng);
+    path_segment.Cosine *= glm::max(0.f, glm::dot(wi.direction, intersection.surfaceNormal));
 	path_segment.BSDF *= bsdf_at_p;
     path_segment.PDF *= pdf_bsdf;
     if (path_segment.PDF<EPSILON)

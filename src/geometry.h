@@ -77,4 +77,4 @@ __device__ float meshIntersectionTest_Optimized(
     glm::vec3& debug,
     const Geom& mesh, StaticMesh::RenderProxy* dev_staticMesh,
     const Ray& ray_World,
-    ShadeableIntersection& OutIntersectionWorld, bool preCompute);
+    ShadeableIntersection& OutIntersectionWorld);

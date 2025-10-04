@@ -110,5 +110,6 @@ struct ShadeableIntersection
 	glm::vec2 uv;
     bool outside;
     int materialId;
-    float t_min;
+    float t_min_World;
+    bool intersectBVH;
 };
