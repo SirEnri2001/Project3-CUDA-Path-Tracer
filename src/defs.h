@@ -7,9 +7,9 @@
 #define USE_MESH_GRID_ACCELERATION 1
 
 // BVH and Octree structure defs. Grid size should be 1+2^3+4^3+8^3+...
-#define GRID_SIZE 73
-#define GRID_WIDTH 4
-#define GRID_LAYERS 3
+#define GRID_SIZE 585
+#define GRID_WIDTH 8
+#define GRID_LAYERS 4
 
 // Split triangle into bounds so that no big root bound
 #define USE_OPTIMIZED_GRID 1

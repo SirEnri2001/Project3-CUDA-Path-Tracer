@@ -110,7 +110,7 @@ __global__ void generateRayFromCamera(Camera cam, int frames, int maxDepths, Pat
         dev_pathAlive[index] = index;
         PathSegment& segment = pathSegments[index];
         thrust::default_random_engine rng = makeSeededRandomEngine(frames, index, maxDepths);
-        thrust::uniform_real_distribution<float> u01(0.f, 1.f);
+        thrust::uniform_real_distribution<float> u01(-0.5f, 0.5f);
         float ramdomNumber1 = u01(rng);
         float ramdomNumber2 = u01(rng);
         segment.ray.origin = cam.position;
@@ -314,7 +314,7 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
     int hit_index = -1;
     ShadeableIntersection Intersect;
     IntersectGeometry(debug,hit_index, Intersect, wj, GeomSize, Geoms);
-    //IntersectMesh(debug, hit_index, Intersect, wj, GeomSize, Geoms, Intersect.t_min_World);
+    IntersectMesh(debug, hit_index, Intersect, wj, GeomSize, Geoms, Intersect.t_min_World);
     if (hit_index != LightGeomIndex)
     {
        OutContribution = glm::vec3(0.f);

@@ -1,6 +1,7 @@
 #include "geometry.h"
 
 #include <glm/gtx/intersect.hpp>
+#include <glm/gtx/transform.hpp>
 #include <thrust/random.h>
 
 #include "mesh.h"
@@ -128,8 +129,8 @@ __device__ void sampleGeometry(
 }
 
 __host__ __device__ float boxIntersectionTest(
-    Geom box,
-    Ray r,
+    const Geom& box,
+    const Ray& r,
     ShadeableIntersection& OutIntersect)
 {
     Ray q;
@@ -179,6 +180,21 @@ __host__ __device__ float boxIntersectionTest(
     }
 
     return -1;
+}
+
+__host__ __device__ float BVHIntersectionTest(
+    const Geom& LocalGeom,
+	const Ray& WorldRay,
+    ShadeableIntersection& OutIntersect,
+    glm::vec3 boxMin, glm::vec3 boxMax
+    )
+{
+    Geom BoundingBox = LocalGeom;
+    glm::mat4 BoundingBoxToLocal = glm::translate(glm::scale(glm::mat4(1.f), (boxMax - boxMin)), (boxMax + boxMin) * 0.5f);
+    BoundingBox.transform = BoundingBox.transform * BoundingBoxToLocal;
+    BoundingBox.inverseTransform = glm::inverse(BoundingBox.transform);
+    BoundingBox.invTranspose = glm::transpose(BoundingBox.inverseTransform);
+    return boxIntersectionTest(BoundingBox, WorldRay, OutIntersect);
 }
 
 __host__ __device__ float UniformBoxIntersectionTest(
@@ -587,12 +603,13 @@ __device__ float IntersectBoundingBoxLayer(
     return -1.f;
 }
 
+
+
 __device__ float IntersectBoundingBoxLayerLocal(
     glm::vec3& debug,
     glm::vec3& OutIntersectLocal,
     glm::vec3& OutNormalLocal,
     glm::vec2& OutUV,
-    const Geom& MeshGeom,
     const Ray& InRayLocal,
     int layer,
     StaticMesh::RenderProxy* MeshProxy, bool preCompute, float& tmin_LastBoundSpace)
@@ -744,7 +761,6 @@ __device__ float meshIntersectionTest_Optimized(
         TempIntersectLocal.intersectPoint,
         TempIntersectLocal.surfaceNormal,
         TempIntersectLocal.uv,
-        mesh,
         ray_Local,
         0,
         dev_staticMesh, true, t_min_boundspace
@@ -762,7 +778,6 @@ __device__ float meshIntersectionTest_Optimized(
             TempIntersectLocal.intersectPoint,
             TempIntersectLocal.surfaceNormal,
             TempIntersectLocal.uv,
-            mesh,
             ray_Local,
             curLayer,
             dev_staticMesh, false, t_min_boundspace

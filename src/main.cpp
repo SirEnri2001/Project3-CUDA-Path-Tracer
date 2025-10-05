@@ -39,7 +39,7 @@ static double MouseDeltaY = 0.0;
 static double lastX = 0.0;
 static double lastY = 0.0;
 float zoom = 1.7f;
-float theta = 1.0f, phi = 0.0f;
+float theta = 1.0f, phi = 0.8f;
 static bool bShouldSaveImage = false;
 static bool bShouldResetCam = false;
 
@@ -365,7 +365,7 @@ int main(int argc, char** argv)
     }
     SceneInstance->PostLoad();
     SceneInstance->CreateDefaultLight();
-    //SceneInstance->CreateDefaultFloor();
+    SceneInstance->CreateDefaultFloor();
 
     // Set up camera stuff from loaded path tracer settings
     Camera& cam = SceneInstance->state.camera;

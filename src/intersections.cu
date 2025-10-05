@@ -81,12 +81,7 @@ __device__ void IntersectMeshBVH(
         {
             glm::vec3 boxMin = geom.MeshProxy_Device->boxMin;
             glm::vec3 boxMax = geom.MeshProxy_Device->boxMax;
-            Geom BoundingBox = geom;
-            glm::mat4 BoundingBoxToLocal = glm::translate(glm::scale(glm::mat4(1.f), (boxMax - boxMin)), (boxMax + boxMin) * 0.5f);
-            BoundingBox.transform = BoundingBox.transform * BoundingBoxToLocal;
-            BoundingBox.inverseTransform = glm::inverse(BoundingBox.transform);
-            BoundingBox.invTranspose = glm::transpose(BoundingBox.inverseTransform);
-            t = boxIntersectionTest(BoundingBox, InRayWorld, TempIntersect);
+            t = BVHIntersectionTest(geom, InRayWorld, TempIntersect, boxMin, boxMax);
         }
         if (t > 0.0f && t_min > t)
         {

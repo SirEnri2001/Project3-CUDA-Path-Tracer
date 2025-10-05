@@ -45,8 +45,8 @@ __host__ __device__ inline glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v)
  * @return                   Ray parameter `t` value. -1 if no intersection.
  */
 __host__ __device__ float boxIntersectionTest(
-    Geom box,
-    Ray r,
+    const Geom& box,
+    const Ray& r,
     ShadeableIntersection& OutIntersect);
 
 // CHECKITOUT
@@ -78,3 +78,9 @@ __device__ float meshIntersectionTest_Optimized(
     const Geom& mesh, StaticMesh::RenderProxy* dev_staticMesh,
     const Ray& ray_World,
     ShadeableIntersection& OutIntersectionWorld);
+__host__ __device__ float BVHIntersectionTest(
+    const Geom& LocalGeom,
+    const Ray& WorldRay,
+    ShadeableIntersection& OutIntersect,
+    glm::vec3 boxMin, glm::vec3 boxMax
+);
