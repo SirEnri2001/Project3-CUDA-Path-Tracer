@@ -13,16 +13,16 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
 __host__ __device__ glm::vec3 sampleHemisphere(
     glm::vec3 normal,
     thrust::default_random_engine& rng);
-__global__ void DirectLightingShadingPathSegments(int depths, int frame, int numPaths,
+__global__ void DirectLightingShadingPathSegments(int depths, int frame, int numPaths, int numMaterials,
     PathSegment* pathSegments, ShadeableIntersection* dev_intersections,
     Scene::RenderProxy* scene,
     int* dev_pathAlive);
-__global__ void SamplingShadingPathSegments(int depths, int frame, int numPaths,
+__global__ void SamplingShadingPathSegments(int depths, int frame, int numPaths, int numMaterials,
     PathSegment* pathSegments, ShadeableIntersection* dev_intersections,
     Scene::RenderProxy* scene,
     int* dev_pathAlive);
 __global__ void generateRayFromCamera(Camera cam, int frames, int maxDepths,
-    PathSegment* pathSegments, int* dev_pathAlive, ShadeableIntersection* dev_Intersections);
+    PathSegment* pathSegments, int* dev_pathAlive, ShadeableIntersection* dev_Intersections, ShadeableIntersection* path_intersect_lights);
 
 __device__ void IntersectGeometry(
     glm::vec3& debug,

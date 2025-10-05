@@ -1,6 +1,10 @@
 #include "common.h"
 
+#include <thrust/sort.h>
+#include <thrust/execution_policy.h>
 #include <cstdio>
+#include <glm/detail/type_vec.hpp>
+
 void checkCUDAErrorFn(const char* msg, const char* file, int line)
 {
 #if ERRORCHECK
@@ -44,4 +48,17 @@ thrust::default_random_engine makeSeededRandomEngine(int frames, int index, int 
 {
     int h = utilhash((1 << 31) | (depth << 22) | frames) ^ utilhash(index);
     return thrust::default_random_engine(h);
+}
+
+
+__host__ __device__
+bool is_nan(glm::vec3 v)
+{
+    return cuda::std::isnan(v.x) || cuda::std::isnan(v.y) || cuda::std::isnan(v.z);
+}
+
+__host__ __device__
+bool is_inf(glm::vec3 v)
+{
+    return cuda::std::isinf(v.x) || cuda::std::isinf(v.y) || cuda::std::isinf(v.z);
 }

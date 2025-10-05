@@ -139,8 +139,12 @@ __global__ void PreIntersect(
     int* dev_geom_ids, int* dev_pathAlive)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= num_paths)
+    {
+        return;
+    }
     int path_index = dev_pathAlive[tid];
-    if (path_index < 0 || tid >= num_paths)
+    if (path_index < 0)
     {
         return;
     }
@@ -161,7 +165,7 @@ __global__ void PreIntersect(
         pathSegment.ray, scene->geoms_size, scene->geoms_Device);
     IntersectMeshBVH(debug,
         hit_geom_index, Intersect,
-        pathSegment.ray, scene->geoms_size, scene->geoms_Device);
+        pathSegment.ray, scene->geoms_size, scene->geoms_Device, Intersect.t_min_World);
 
     dev_geom_ids[path_index] = hit_geom_index;
     pathSegment.debug = Intersect.surfaceNormal;
@@ -191,8 +195,12 @@ __global__ void Intersect(
     int* dev_geom_ids, int* dev_pathAlive)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= num_paths)
+    {
+        return;
+    }
     int path_index = dev_pathAlive[tid];
-    if (path_index < 0 || tid >= num_paths)
+    if (path_index < 0)
     {
         return;
     }

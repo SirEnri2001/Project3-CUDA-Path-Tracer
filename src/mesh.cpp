@@ -144,7 +144,7 @@ void ReadAttributeGLTF(
 
 void LoadGLTFImpl(StaticMesh& Mesh, const tinygltf::Mesh& gltfMesh, const tinygltf::Model& model)
 {
-	Mesh.MaterialId = gltfMesh.primitives[0].material;
+	Mesh.MaterialId = std::max(0, gltfMesh.primitives[0].material);
     for (size_t j = 0; j < 1 /*gltfMesh.primitives.size()*/; ++j) {
         const tinygltf::Primitive& primitive = gltfMesh.primitives[j];
         if (primitive.mode != TINYGLTF_MODE_TRIANGLES) {
@@ -248,6 +248,7 @@ StaticMesh::~StaticMesh()
 
 void StaticMesh::CreateProxy()
 {
+    bHasProxy = true;
     Proxy_Host = new RenderProxy();
     checkCUDAError("StaticMesh::CreateProxy Start");
     Proxy_Host->VertexCount = Data.VertexCount;
@@ -317,6 +318,7 @@ void StaticMesh::CreateProxy()
 
 void StaticMesh::DestroyProxy()
 {
+    bHasProxy = false;
     cudaFree(Proxy_Device);
     cudaFree(Proxy_Host->raw.VertexPosition_Device);
     cudaFree(Proxy_Host->raw.VertexNormal_Device);
@@ -357,6 +359,7 @@ StaticMesh* StaticMeshManager::CreateAndGetMesh(std::string MeshName)
     {
 		Meshes[MeshName] = std::make_unique<StaticMesh>();
 	}
+    Meshes[MeshName]->Proxy_Host = nullptr;
     return Meshes[MeshName].get();
 }
 
@@ -381,4 +384,15 @@ void StaticMeshManager::CreateRenderProxyForAll()
             Mesh->CreateProxy();
         }
 	}
+}
+
+bool StaticMeshManager::CheckAllMeshProxies()
+{
+    // Create Proxy for all meshes
+    for (auto& NameMesh : Meshes)
+    {
+        auto* Mesh = NameMesh.second.get();
+        assert(Mesh->Proxy_Host && Mesh->Proxy_Device);
+    }
+    return true;
 }

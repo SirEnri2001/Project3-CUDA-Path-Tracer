@@ -39,6 +39,9 @@ void PTEngine::Init()
 
 	cudaMalloc(&RenderResource.dev_path_intersections, pixelcount * sizeof(ShadeableIntersection));
 	cudaMemset(RenderResource.dev_path_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
+
+	cudaMalloc(&RenderResource.path_intersect_lights, pixelcount * sizeof(ShadeableIntersection));
+	cudaMemset(RenderResource.path_intersect_lights, 0, pixelcount * sizeof(ShadeableIntersection));
 	// allocate device memory for materialIds
 	cudaMalloc(&RenderResource.dev_geom_ids, pixelcount * sizeof(int));
 	cudaMemset(RenderResource.dev_geom_ids, -1, pixelcount * sizeof(int));

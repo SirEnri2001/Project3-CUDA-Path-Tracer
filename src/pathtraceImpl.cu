@@ -101,7 +101,7 @@ __host__ __device__ glm::vec3 sampleHemisphere(
 * motion blur - jitter rays "in time"
 * lens effect - jitter ray origin positions based on a lens
 */
-__global__ void generateRayFromCamera(Camera cam, int frames, int maxDepths, PathSegment* pathSegments, int* dev_pathAlive, ShadeableIntersection* dev_Intersections)
+__global__ void generateRayFromCamera(Camera cam, int frames, int maxDepths, PathSegment* pathSegments, int* dev_pathAlive, ShadeableIntersection* dev_Intersections, ShadeableIntersection* path_intersect_lights)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -134,6 +134,7 @@ __global__ void generateRayFromCamera(Camera cam, int frames, int maxDepths, Pat
         Intersection.surfaceNormal = glm::vec3(0.f, 0.f, 0.f);
         Intersection.outside = true;
         dev_Intersections[index] = Intersection;
+        path_intersect_lights[index] = Intersection;
     }
 }
 
@@ -276,7 +277,7 @@ __device__ bool sampleLightFromIntersections(
 		hit_geom_index,
         Intersect,
         wj, geomSize, geoms);
-    IntersectMesh(debug,
+    IntersectMeshBVH(debug,
         hit_geom_index,
         Intersect,
         wj, geomSize, geoms, Intersect.t_min_World);
@@ -314,7 +315,7 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
     int hit_index = -1;
     ShadeableIntersection Intersect;
     IntersectGeometry(debug,hit_index, Intersect, wj, GeomSize, Geoms);
-    IntersectMesh(debug, hit_index, Intersect, wj, GeomSize, Geoms, Intersect.t_min_World);
+    IntersectMeshBVH(debug, hit_index, Intersect, wj, GeomSize, Geoms, Intersect.t_min_World);
     if (hit_index != LightGeomIndex)
     {
        OutContribution = glm::vec3(0.f);
@@ -329,24 +330,25 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
 }
 
 
-__global__ void DirectLightingShadingPathSegments(int depths, int frame, int numPaths,
+__global__ void DirectLightingShadingPathSegments(int depths, int frame, int numPaths, int numMaterials,
     PathSegment* pathSegments, ShadeableIntersection* dev_intersections,
     Scene::RenderProxy* scene,
     int* dev_pathAlive)
 {
     int tid = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+    if (tid >= numPaths)
+    {
+        return;
+    }
     int pathIndex = dev_pathAlive[tid];
     if (pathIndex < 0)
     {
         return;
     }
-    if (tid >= numPaths)
-    {
-        return;
-    }
     PathSegment path_segment = pathSegments[pathIndex];
     ShadeableIntersection intersection = dev_intersections[pathIndex];
-    if (intersection.materialId < 0) {
+    if (intersection.materialId < 0 || intersection.materialId>=numMaterials) {
         path_segment.remainingBounces = 0;
         pathSegments[pathIndex] = path_segment;
         return;
@@ -431,7 +433,7 @@ __device__ void btdfSample(glm::vec3& debug, bool outside, glm::vec3& outBSDF, f
         out_wi.direction = glm::refract(-ViewDir, N, 1.f / ETA);
         out_wi.origin = p + 0.001f * surfaceNormal;
     }
-    if (glm::length(out_wi.direction)==0.f)
+    if (is_nan(out_wi.direction)&& glm::length(out_wi.direction)==0.f)
     {
         // retract a little bit so no self intersect
         out_wi.origin = p + 0.0001f * N;
@@ -440,24 +442,24 @@ __device__ void btdfSample(glm::vec3& debug, bool outside, glm::vec3& outBSDF, f
     }
 }
 
-__global__ void SamplingShadingPathSegments(int depths, int frame, int numPaths,
+__global__ void SamplingShadingPathSegments(int depths, int frame, int numPaths, int numMaterials,
     PathSegment* pathSegments, ShadeableIntersection* dev_intersections,
     Scene::RenderProxy* scene,
     int* dev_pathAlive)
 {
     int tid = (blockIdx.x * blockDim.x) + threadIdx.x;
+    if (tid >= numPaths)
+    {
+        return;
+    }
     int pathIndex = dev_pathAlive[tid];
     if (pathIndex < 0)
     {
         return;
     }
-    if (tid >= numPaths)
-    {
-        return;
-    }
     PathSegment path_segment = pathSegments[pathIndex];
     ShadeableIntersection intersection = dev_intersections[pathIndex];
-    if (intersection.materialId < 0) {
+    if (intersection.materialId < 0 || intersection.materialId >= numMaterials) {
         path_segment.remainingBounces = 0;
         pathSegments[pathIndex] = path_segment;
         return;
@@ -502,3 +504,52 @@ __global__ void SamplingShadingPathSegments(int depths, int frame, int numPaths,
 	path_segment.remainingBounces--;
     pathSegments[pathIndex] = path_segment;
 }
+
+//__global__ void SampleDirectLight(int depths, int frame, int numPaths,
+//    PathSegment* pathSegments, ShadeableIntersection* dev_intersections, ShadeableIntersection* dev_LightIntersections,
+//    Scene::RenderProxy* scene,
+//    int* dev_pathAlive)
+//{
+//    int tid = (blockIdx.x * blockDim.x) + threadIdx.x;
+//    int pathIndex = dev_pathAlive[tid];
+//    if (pathIndex < 0)
+//    {
+//        return;
+//    }
+//    if (tid >= numPaths)
+//    {
+//        return;
+//    }
+//    PathSegment path_segment = pathSegments[pathIndex];
+//    ShadeableIntersection intersection = dev_intersections[pathIndex];
+//    if (intersection.materialId < 0) {
+//        path_segment.remainingBounces = 0;
+//        pathSegments[pathIndex] = path_segment;
+//        return;
+//    }
+//    Material material = scene->materials_Device[intersection.materialId];
+//    glm::vec3 p = intersection.intersectPoint + EPSILON * intersection.surfaceNormal;
+//    thrust::default_random_engine rng = makeSeededRandomEngine(frame, pathIndex, depths * path_segment.remainingBounces);
+//    if (material.emittance > 0.)
+//    {
+//        path_segment.Contribution += path_segment.BSDF * material.emittance / path_segment.PDF * path_segment.Cosine;
+//        path_segment.remainingBounces = 0;
+//        pathSegments[pathIndex] = path_segment;
+//        return;
+//    }
+//    glm::vec3 contrib;
+//    glm::vec3 debug;
+//    glm::vec3 ViewDir = -path_segment.ray.direction;
+//
+//    thrust::uniform_int_distribution<int> uInt(0, scene->lights_size - 1);
+//    int LightIndex = uInt(rng);
+//    int LightGeomIndex = scene->light_index_Device[LightIndex];
+//    Geom LightGeom = scene->geoms_Device[LightGeomIndex];
+//    Material LightMat = scene->materials_Device[LightGeom.materialid];
+//    glm::vec3 directLight;
+//    float pdf_Ld;
+//    Ray wj;
+//    bool sampledDirectLight = sampleLightFromIntersections(debug, directLight, pdf_Ld, wj, p, 
+//        LightMat, LightGeom, scene->geoms_size, scene->geoms_Device, rng);
+//    pdf_Ld /= LightSize;
+//}

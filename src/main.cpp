@@ -24,6 +24,7 @@
 #include <sstream>
 #include <string>
 
+#include "common.h"
 #include "defs.h"
 
 static std::string startTimeString;
@@ -32,7 +33,7 @@ static std::string startTimeString;
 static bool leftMousePressed = false;
 static bool rightMousePressed = false;
 static bool middleMousePressed = false;
-static bool scrolled = false;
+static bool bClearbuffers = false;
 static double MouseDeltaX = 0.0;
 static double MouseDeltaY = 0.0;
 
@@ -242,7 +243,6 @@ bool InitGLFW(int width, int height)
 void RenderImGui(GuiDataContainer* imguiData)
 {
     mouseOverImGuiWinow = io->WantCaptureMouse;
-
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
@@ -365,7 +365,7 @@ int main(int argc, char** argv)
     }
     SceneInstance->PostLoad();
     SceneInstance->CreateDefaultLight();
-    SceneInstance->CreateDefaultFloor();
+    //SceneInstance->CreateDefaultFloor();
 
     // Set up camera stuff from loaded path tracer settings
     Camera& cam = SceneInstance->state.camera;
@@ -381,6 +381,7 @@ int main(int argc, char** argv)
     Engine.Init();
 
     SceneInstance->CreateRenderProxyForAll();
+
     SceneInstance->CenterCamera();
     cam.SetCamera(phi, theta, zoom, 0., 0.);
     // GLFW main loop
@@ -389,7 +390,7 @@ int main(int argc, char** argv)
         {
             glfwPollEvents();
 
-            bool camMoved = scrolled;
+            bool camMoved = bClearbuffers;
             float transX = 0.f, transY = 0.f;
             if (leftMousePressed && (abs(MouseDeltaX) > 0.0 || abs(MouseDeltaY) > 0.0))
             {
@@ -418,7 +419,8 @@ int main(int argc, char** argv)
                 Engine.ClearBuffers();
                 SceneInstance->state.frames = 0;
             }
-            scrolled = false;
+            bClearbuffers = false;
+
 
             // Map OpenGL buffer object for writing from CUDA on a single GPU
             // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
@@ -428,7 +430,6 @@ int main(int argc, char** argv)
             Engine.RenderResource.pbo = pbo_dptr;
             // execute the kernel
             Engine.Tick(SceneInstance);
-
             // unmap buffer object
             cudaGLUnmapBufferObject(pbo);
 
@@ -463,11 +464,12 @@ int main(int argc, char** argv)
     else {
         while (SceneInstance->state.frames < PTInfo.frames)
         {
+            Engine.GuiData.isDebug = false;
             Engine.RenderResource.pbo = nullptr;
             // execute the kernel
             Engine.Tick(SceneInstance);
             SceneInstance->state.frames++;
-            if (SceneInstance->state.frames%20)
+            if (SceneInstance->state.frames%20==0)
             {
                 SaveImage(PTInfo, SceneInstance->state.frames, "PT", SceneInstance->state.image);
             }
@@ -532,6 +534,13 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
         case GLFW_KEY_S:
             bShouldSaveImage = true;
             break;
+        case GLFW_KEY_C:
+            bClearbuffers = true;
+            break;
+        case GLFW_KEY_D:
+            bClearbuffers = true;
+            PTEngine::Get()->GuiData.isDebug = !PTEngine::Get()->GuiData.isDebug;
+            break;
         case GLFW_KEY_SPACE:
             bShouldResetCam = true;
             break;
@@ -553,7 +562,7 @@ void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
 
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
 {
-    scrolled = true;
+    bClearbuffers = true;
     if (yoffset > 0)
     {
         zoom -= 0.1f;

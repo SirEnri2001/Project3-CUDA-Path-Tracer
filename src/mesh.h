@@ -55,6 +55,7 @@ public:
 
 	unsigned int AttribFlags = 0;
 	int MaterialId;
+	bool bHasProxy = false;
 	RenderProxy* Proxy_Host = nullptr; // Host readable address
 	RenderProxy* Proxy_Device = nullptr; // Device readable address
 
@@ -76,4 +77,5 @@ public:
 	StaticMesh* CreateAndGetMesh(std::string MeshName);
 	void CreateRenderProxyForAll();
 	void CalculateOctreeStructureCUDA();
+	bool CheckAllMeshProxies();
 };

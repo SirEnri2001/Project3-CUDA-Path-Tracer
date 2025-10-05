@@ -103,7 +103,7 @@
             "SCALE":[0.01,10.0,10.0]
         },
         {
-            "TYPE":"sphere",
+            "TYPE":"cube",
             "MATERIAL":"Transmissive",
             "TRANS":[2.0,2.0,2.0],
             "ROTAT":[0.0,0.0,0.0],

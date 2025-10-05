@@ -13,6 +13,7 @@
 #include "glm/glm.hpp"
 #include "common.h"
 #include "pathtraceImpl.h"
+#include "material.h"
 
 //Kernel that writes the image to the OpenGL PBO directly.
 __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image)
@@ -36,18 +37,6 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
 		pbo[index].y = color.y;
 		pbo[index].z = color.z;
 	}
-}
-
-__host__ __device__
-bool is_nan(glm::vec3 v)
-{
-	return cuda::std::isnan(v.x) || cuda::std::isnan(v.y) || cuda::std::isnan(v.z);
-}
-
-__host__ __device__
-bool is_inf(glm::vec3 v)
-{
-	return cuda::std::isinf(v.x) || cuda::std::isinf(v.y) || cuda::std::isinf(v.z);
 }
 
 // Add the current iteration's output to the overall image
@@ -102,8 +91,9 @@ void pathtrace(PTEngine* Engine, Scene* scene)
 	const int blockSize1d = 64;
 	auto& Resource = Engine->RenderResource;
 	auto& State = scene->state;
+	checkCUDAError("generate camera ray before");
 	generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(cam, State.frames, Engine->Info.depths, 
-		Resource.dev_paths, Resource.device_pathAlive, Resource.dev_path_intersections);
+		Resource.dev_paths, Resource.device_pathAlive, Resource.dev_path_intersections, Resource.path_intersect_lights);
 	checkCUDAError("generate camera ray");
 	PathSegment* dev_path_begin = Resource.dev_paths;
 	int total_paths = pixelcount;
@@ -159,12 +149,16 @@ void pathtrace(PTEngine* Engine, Scene* scene)
 
 		std::cout << "number of paths: " << num_paths << std::endl;
 		numblocksPathSegmentTracing = (total_paths + blockSize1d - 1) / blockSize1d;
+		if (Engine->GuiData.isDebug)
+		{
+			break;
+		}
 		DirectLightingShadingPathSegments << <numblocksPathSegmentTracing, blockSize1d >> > (
-			depth, State.frames, num_paths, dev_path_begin,
+			depth, State.frames, num_paths, scene->materials.size(), dev_path_begin,
 			Resource.dev_path_intersections,
 			scene->Proxy_Device, Resource.device_pathAlive);
 		SamplingShadingPathSegments << <numblocksPathSegmentTracing, blockSize1d >> >(
-			depth, State.frames, num_paths, dev_path_begin,
+			depth, State.frames, num_paths, scene->materials.size(), dev_path_begin,
 			Resource.dev_path_intersections,
 			scene->Proxy_Device, Resource.device_pathAlive);
 		Engine->GuiData.TracedDepth = depth;

@@ -22,6 +22,7 @@ struct PathTraceRenderResource
 	glm::vec3* dev_image = nullptr;
 	PathSegment* dev_paths = nullptr;
 	ShadeableIntersection* dev_path_intersections = nullptr;
+	ShadeableIntersection* path_intersect_lights = nullptr;
 	int* dev_geom_ids = nullptr;
 	int* device_pathAlive = nullptr;
 	uchar4* pbo = nullptr;

@@ -18,6 +18,7 @@
 #include <stb_image.h>
 #include <stb_image_write.h>
 // #define TINYGLTF_NOEXCEPTION // optional. disable exception handling.
+#include "common.h"
 #include "MeshLoader/tiny_gltf.h"
 
 using namespace std;
@@ -417,8 +418,12 @@ void Scene::PostLoad()
 void Scene::CreateRenderProxyForAll()
 {
 	StaticMeshManager::Get()->CreateRenderProxyForAll();
+    StaticMeshManager::Get()->CheckAllMeshProxies();
+    checkCUDAError("2");
 	StaticMeshManager::Get()->CalculateOctreeStructureCUDA();
+    checkCUDAError("3");
     TextureManager::Get()->LoadAllTexturesToDevice();
+    checkCUDAError("4");
     if (lights.size()==0)
     {
         std::cerr << "No lighting objects in the scene!" << std::endl;
@@ -448,10 +453,14 @@ void Scene::CreateRenderProxyForAll()
         g.MeshProxy_Device = nullptr;
         if (g.Mesh_Host)
         {
+            assert(g.Mesh_Host->bHasProxy);
+            //assert(((long long)g.Mesh_Host->Proxy_Device - 0x700000000) >> 32 == 0); // check address space...
 			g.MeshProxy_Device = g.Mesh_Host->Proxy_Device;
         }
     }
 
+    int i = materials.size();
+    geoms.erase(std::remove_if(geoms.begin(), geoms.end(), [i](const Geom& g) {return (g.MeshProxy_Device == nullptr && g.type==MESH) || g.materialid>= i; }), geoms.end());
     if (Proxy_Host)
     {
         DestroySceneRenderProxy();
@@ -463,6 +472,10 @@ void Scene::CreateRenderProxyForAll()
 	Proxy_Host->materials_size = materials.size();
 
     cudaMalloc((void**)&Proxy_Host->geoms_Device, sizeof(Geom) * geoms.size());
+    //for (auto& g : geoms)
+    //{
+    //    assert(((long long)g.MeshProxy_Device - 0x700000000) >> 32 == 0);
+    //}
 	cudaMemcpy(Proxy_Host->geoms_Device, geoms.data(), sizeof(Geom) * geoms.size(), cudaMemcpyHostToDevice);
 
     cudaMalloc((void**)&Proxy_Host->materials_Device, sizeof(Material) * materials.size());
