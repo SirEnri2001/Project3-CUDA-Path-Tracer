@@ -277,7 +277,7 @@ __device__ bool sampleLightFromIntersections(
 		hit_geom_index,
         Intersect,
         wj, geomSize, geoms);
-    IntersectMeshBVH(debug,
+    IntersectMesh(debug,
         hit_geom_index,
         Intersect,
         wj, geomSize, geoms, Intersect.t_min_World);
@@ -315,7 +315,7 @@ __device__ void SampleDirectLightMIS(glm::vec3& debug, glm::vec3& OutContributio
     int hit_index = -1;
     ShadeableIntersection Intersect;
     IntersectGeometry(debug,hit_index, Intersect, wj, GeomSize, Geoms);
-    IntersectMeshBVH(debug, hit_index, Intersect, wj, GeomSize, Geoms, Intersect.t_min_World);
+    IntersectMesh(debug, hit_index, Intersect, wj, GeomSize, Geoms, Intersect.t_min_World);
     if (hit_index != LightGeomIndex)
     {
        OutContribution = glm::vec3(0.f);
@@ -376,7 +376,6 @@ __global__ void DirectLightingShadingPathSegments(int depths, int frame, int num
     SampleDirectLightMIS(debug, contrib, p, ViewDir, intersection.surfaceNormal, material,
         scene->geoms_size, scene->geoms_Device, scene->lights_size, LightGeom, LightMat, LightGeomIndex, rng);
 
-    path_segment.debug = intersection.surfaceNormal;
 	path_segment.Contribution += path_segment.BSDF * contrib / path_segment.PDF * path_segment.Cosine;
     pathSegments[pathIndex] = path_segment;
 }

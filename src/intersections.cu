@@ -168,7 +168,6 @@ __global__ void PreIntersect(
         pathSegment.ray, scene->geoms_size, scene->geoms_Device, Intersect.t_min_World);
 
     dev_geom_ids[path_index] = hit_geom_index;
-    pathSegment.debug = Intersect.surfaceNormal;
     pathSegments[path_index] = pathSegment;
     if (hit_geom_index == -1)
     {
@@ -181,7 +180,7 @@ __global__ void PreIntersect(
         int matId = scene->geoms_Device[hit_geom_index].materialid;
         Intersect.materialId = matId;
         Intersect.t_min_World = t_max;
-        pathSegment.debug = Intersect.surfaceNormal;
+        pathSegment.debug = glm::vec3((float)matId / 40.f, 1.f - (float)matId / 40.f, 0.f);
         pathSegments[path_index] = pathSegment;
     }
     intersections[path_index] = Intersect;

@@ -350,6 +350,7 @@ void Scene::ReadGLTF(std::string filename)
     }
 
 	// Load Materials
+    materials.resize(model.materials.size());
     for (size_t i = 0; i < model.materials.size(); i++)
     {
         const tinygltf::Material& material = model.materials[i];
@@ -359,7 +360,7 @@ void Scene::ReadGLTF(std::string filename)
 
         double metallicFactor = pbr.metallicFactor;
         double roughnessFactor = pbr.roughnessFactor;
-        Material mat;
+        Material& mat = materials[i];
         mat.color = glm::vec3(baseColorFactor[0], baseColorFactor[1], baseColorFactor[2]);
         mat.roughness = roughnessFactor;
         mat.metallicness = metallicFactor;
@@ -379,7 +380,6 @@ void Scene::ReadGLTF(std::string filename)
             mat.isLight = true;
             mat.emittance = 1.0f;
 		}
-        materials.push_back(mat);
     }
 
 	// Load Meshes
