@@ -190,7 +190,7 @@ __device__ void bsdfPBR(glm::vec3& debug, glm::vec3& outBSDF,
 	{
         params.baseColor = material.color;
 	}
-    params.baseColor = material.color;
+    //params.baseColor = material.color;
     params.roughness = material.roughness;
     params.metallic = material.metallicness;
 #if USE_UNIFORM_SAMPLING
@@ -207,6 +207,7 @@ __device__ void bsdfPBR(glm::vec3& debug, glm::vec3& outBSDF,
     outPDF = D * CosTheta;
 #endif
     outBSDF = BRDF(params, L, V, N);
+    debug = glm::vec3(uv.x, uv.y, 0.f);
 }
 
 __device__ void bsdfPBRSample(glm::vec3& debug, glm::vec3& outBSDF, float& outPDF, Ray& out_wi, glm::vec3 ViewDir, glm::vec3 p,
@@ -375,7 +376,7 @@ __global__ void DirectLightingShadingPathSegments(int depths, int frame, int num
 
     SampleDirectLightMIS(debug, contrib, p, ViewDir, intersection.surfaceNormal, material,
         scene->geoms_size, scene->geoms_Device, scene->lights_size, LightGeom, LightMat, LightGeomIndex, rng);
-
+    path_segment.debug = debug;
 	path_segment.Contribution += path_segment.BSDF * contrib / path_segment.PDF * path_segment.Cosine;
     pathSegments[pathIndex] = path_segment;
 }

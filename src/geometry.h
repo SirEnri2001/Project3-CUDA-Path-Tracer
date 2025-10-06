@@ -79,6 +79,7 @@ __device__ float meshIntersectionTest_Optimized(
     const Ray& ray_World,
     ShadeableIntersection& OutIntersectionWorld);
 __host__ __device__ float BVHIntersectionTest(
+    glm::vec3&debug,
     const Geom& LocalGeom,
     const Ray& WorldRay,
     ShadeableIntersection& OutIntersect,

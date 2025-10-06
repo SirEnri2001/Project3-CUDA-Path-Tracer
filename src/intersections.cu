@@ -81,15 +81,15 @@ __device__ void IntersectMeshBVH(
         {
             glm::vec3 boxMin = geom.MeshProxy_Device->boxMin;
             glm::vec3 boxMax = geom.MeshProxy_Device->boxMax;
-            t = BVHIntersectionTest(geom, InRayWorld, TempIntersect, boxMin, boxMax);
-        }
-        if (t > 0.0f && t_min > t)
-        {
-            t_min = t;
-            hit_geom_index = i;
-            OutIntersect = TempIntersect;
-            OutIntersect.t_min_World = t_min;
-            OutIntersect.intersectBVH = geom.type == MESH;
+            t = BVHIntersectionTest(debug, geom, InRayWorld, TempIntersect, boxMin, boxMax);
+            if (t > 0.0f && t_min > t)
+            {
+                t_min = t;
+                hit_geom_index = i;
+                OutIntersect = TempIntersect;
+                OutIntersect.t_min_World = t_min;
+                OutIntersect.intersectBVH = geom.type == MESH;
+            }
         }
     }
 }
@@ -116,7 +116,17 @@ __device__ float IntersectMesh(
 #if USE_MESH_GRID_ACCELERATION
             t = meshIntersectionTest_Optimized(debug, geom, geom.MeshProxy_Device, InRayWorld, TempIntersect);
 #else
-            t = meshIntersectionTest(geom, geom.MeshProxy_Device, InRayWorld, OutIntersect);
+#if DISABLE_MESH_ACCELERATION
+            t = meshIntersectionTest(geom, geom.MeshProxy_Device, InRayWorld, TempIntersect);
+#else
+            glm::vec3 boxMin = geom.MeshProxy_Device->boxMin;
+            glm::vec3 boxMax = geom.MeshProxy_Device->boxMax;
+            float t2 = BVHIntersectionTest(debug, geom, InRayWorld, TempIntersect, boxMin, boxMax);
+            if (t2 > 0.0f && t_min > t2)
+            {
+                t = meshIntersectionTest(geom, geom.MeshProxy_Device, InRayWorld, TempIntersect);
+            }
+#endif
 #endif
         }
         // Compute the minimum t from the intersection tests to determine what
@@ -159,7 +169,7 @@ __global__ void PreIntersect(
     int hit_geom_index = -1;
     ShadeableIntersection Intersect = intersections[path_index];
     float t_max = Intersect.t_min_World;
-    glm::vec3 debug;
+    glm::vec3 debug = glm::vec3(0.f);
     IntersectGeometry(debug,
         hit_geom_index, Intersect,
         pathSegment.ray, scene->geoms_size, scene->geoms_Device);
@@ -180,7 +190,6 @@ __global__ void PreIntersect(
         int matId = scene->geoms_Device[hit_geom_index].materialid;
         Intersect.materialId = matId;
         Intersect.t_min_World = t_max;
-        pathSegment.debug = glm::vec3((float)matId / 40.f, 1.f - (float)matId / 40.f, 0.f);
         pathSegments[path_index] = pathSegment;
     }
     intersections[path_index] = Intersect;
@@ -237,6 +246,10 @@ __global__ void Intersect(
         int matId = scene->geoms_Device[hit_geom_index].materialid;
         Intersect.materialId = matId;
         Intersect.t_min_World = t_min2;
+    }
+    if (glm::length(debug) > 0.1f)
+    {
+        pathSegment.debug = debug;
     }
     pathSegments[path_index] = pathSegment;
     intersections[path_index] = Intersect;

@@ -29,7 +29,7 @@ Scene::Scene(PathTraceInfo Info)
     Camera& camera = state.camera;
     camera.resolution.x = Info.x;
     camera.resolution.y = Info.y;
-    float fovy = 45.f;
+    float fovy = 30.f;
     state.frames = 0;
     state.depths = 0;
     state.imageName = "PT_Result";
@@ -83,7 +83,7 @@ void Scene::CreateDefaultLight()
 
     Material Mat;
     Mat.color = glm::vec3(0.9f, 0.8f, 0.7f);
-    Mat.emittance = 3.f;
+    Mat.emittance = 8.f;
     Mat.isLight = true;
     materials.push_back(Mat);
     geoms.push_back(LightGeom);

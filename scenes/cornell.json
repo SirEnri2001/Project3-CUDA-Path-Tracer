@@ -7,12 +7,6 @@
             "RGB":[1.0, 1.0, 1.0],
             "EMITTANCE":16.0
         },
-        "mesh_light":
-        {
-            "TYPE":"Emitting",
-            "RGB":[0.5, 0.7, 1.0],
-            "EMITTANCE":10.0
-        },
         "Lit0_Diffuse":
         {
             "TYPE":"DefaultLit",
@@ -31,7 +25,7 @@
         {
             "TYPE":"DefaultLit",
             "RGB":[0.35, 0.85, 0.35],
-            "ROUGHNESS":0.5,
+            "ROUGHNESS":0.1,
             "SPECULAR" : 0.5
         },
         "Lit3_Red":
@@ -40,6 +34,15 @@
             "RGB":[0.85, 0.35, 0.35],
             "ROUGHNESS":0.1,
             "SPECULAR" : 0.8
+        },
+        "LitWithMat":{
+            "TYPE":"DefaultLit",
+            "RGB":[0.85, 0.35, 0.35],
+            "TEX":{
+                "BASECOLOR":"../texture/spot_texture.png"
+            },
+            "ROUGHNESS":1.0,
+            "SPECULAR" : 0.5
         }
         
     },
@@ -100,10 +103,10 @@
         },
         {
             "TYPE":"mesh",
-            "MATERIAL":"Lit0_Diffuse",
+            "MATERIAL":"LitWithMat",
             "MESH":"spot_triangulated",
-            "TRANS":[-2.0,2.0,-2.0],
-            "ROTAT":[0.0,0.0,0.0],
+            "TRANS":[2.0,2.0,2.0],
+            "ROTAT":[0.0,90.0,0.0],
             "SCALE":[2.0,2.0,2.0]
         }
     ]

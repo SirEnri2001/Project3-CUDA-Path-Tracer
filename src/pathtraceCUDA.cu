@@ -53,6 +53,7 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
 		if (bInvalidVal)
 		{
 			iterationPath.debug = glm::vec3(0, 1, 0);
+			iterationPath.Contribution = glm::vec3(0, 0, 0);
 		}
 		if (debug)
 		{

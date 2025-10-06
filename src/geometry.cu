@@ -183,6 +183,7 @@ __host__ __device__ float boxIntersectionTest(
 }
 
 __host__ __device__ float BVHIntersectionTest(
+    glm::vec3& debug,
     const Geom& LocalGeom,
 	const Ray& WorldRay,
     ShadeableIntersection& OutIntersect,
@@ -669,6 +670,7 @@ __device__ float IntersectBoundingBoxLayerLocal(
             // the ray is not intersect with the bounding box
             return -1.f;
         }
+        debug += glm::vec3(0.01f * temp_t, 0.f, 0.f);
 
         // step 3: check current bounding if intersect with any triangle
         int boundIndex = GetPointBoundIndex(BoundSpaceRay.origin, layer);
@@ -677,6 +679,7 @@ __device__ float IntersectBoundingBoxLayerLocal(
         int triangleCount = endTriangleIndex - startTriangleIndex;
         if (triangleCount > 0 && startTriangleIndex != -1)
         {
+            debug += glm::vec3(0.f, 0.005f, 0.f);
             float minDistance = -1.f;
             glm::vec3 IntersectPos_Local;
             glm::vec3 IntersectNor_Local;
@@ -720,6 +723,7 @@ __device__ float IntersectBoundingBoxLayerLocal(
                 BoundSpaceIntersectPoint = IntersectPos_Local - MeshProxy->boxMax;
                 BoundSpaceIntersectPoint /= (MeshProxy->boxMax - MeshProxy->boxMin);
                 tmin_LastBoundSpace = glm::length(BoundSpaceIntersectPoint - rayStartBoundSpace);
+                debug += glm::vec3(0.f, 0.f, 0.1f);
                 return glm::length(OutIntersectLocal - InRayLocal.origin);
             }
         }
@@ -792,7 +796,8 @@ __device__ float meshIntersectionTest_Optimized(
     {
         OutIntersectionWorld.intersectPoint = glm::vec3(multiplyMV(mesh.transform, glm::vec4(IntersectMin.intersectPoint, 1.f)));
         OutIntersectionWorld.surfaceNormal = glm::normalize(glm::vec3(multiplyMV(mesh.invTranspose, glm::vec4(IntersectMin.surfaceNormal, 0.f))));
-        return glm::length(OutIntersectionWorld.intersectPoint - ray_World.origin);
+        OutIntersectionWorld.uv = IntersectMin.uv;
+    	return glm::length(OutIntersectionWorld.intersectPoint - ray_World.origin);
     }
     return -1;
 }

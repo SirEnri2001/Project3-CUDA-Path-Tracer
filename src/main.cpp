@@ -251,6 +251,7 @@ void RenderImGui(GuiDataContainer* imguiData)
 	ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
     bShouldSaveImage = ImGui::Button("Save Image");
     ImGui::Text("%.3f ms/frame (%.1f FPS)", 1000.0f * ImGui::GetIO().DeltaTime, ImGui::GetIO().Framerate);
+    std::cout << "Last Frame " << 1000.0f * ImGui::GetIO().DeltaTime << " ms" << std::endl;
     ImGui::End();
 	ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -279,6 +280,7 @@ int main(int argc, char** argv)
     PTInfo.frames = -1;
     PTInfo.depths = 16;
     PTInfo.ShowGUI = 2;
+    bool shouldDebug = false;
 
     for (int i = 1; i < argc; i+=2)
     {
@@ -310,6 +312,10 @@ int main(int argc, char** argv)
         else if (key=="--gui")
         {
             PTInfo.ShowGUI = std::atoi(argv[i + 1]);
+        }
+        else if (key == "--debug")
+        {
+            shouldDebug = std::atoi(argv[i + 1])>0;
         }
         else if (i==argc-1)
         {
@@ -378,6 +384,8 @@ int main(int argc, char** argv)
 
     // Create path tracer and scene data
     PTEngine Engine(PTInfo);
+
+    Engine.GuiData.isDebug = shouldDebug;
     Engine.Init();
 
     SceneInstance->CreateRenderProxyForAll();

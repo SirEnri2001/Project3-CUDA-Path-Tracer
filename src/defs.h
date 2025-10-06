@@ -4,11 +4,12 @@
 #define COMMANDLET 1
 
 // Enable BVH acceleration
-#define USE_MESH_GRID_ACCELERATION 1
+#define DISABLE_MESH_ACCELERATION 0
+#define USE_MESH_GRID_ACCELERATION 0
 
 // BVH and Octree structure defs. Grid size should be 1+2^3+4^3+8^3+...
-#define GRID_SIZE 73
-#define GRID_WIDTH 4
+#define GRID_SIZE 600
+#define GRID_WIDTH 8
 #define GRID_LAYERS 3
 
 // Split triangle into bounds so that no big root bound
